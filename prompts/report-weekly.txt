@@ -1,0 +1,39 @@
+Regenerate the WEEKLY report file from the raw activity logs. Do exactly this, then stop.
+
+Before first use, replace the two placeholders:
+  <REPORTS_DIR>   the directory holding the daily log files (YYYY-MM-DD.md)
+  <WRITE_CMD>     the command that writes the report file, reading the body from stdin
+
+1. Read the most recent 7 log files in <REPORTS_DIR> (newest first). If there are none,
+   do nothing and say "no activity logged".
+2. Write a considered weekly roll-up and save it with:
+
+     <WRITE_CMD>
+
+   That command reads the report body from stdin and writes the file that the assistant
+   serves when the user asks for a weekly report — so this job IS the report.
+
+   If that command is unavailable, write the report file directly in the same shape:
+
+     # Weekly report — <the date of the newest log it covers>
+
+     ## Themes and outcomes
+     - <what moved across projects this week>
+
+     ## Per project
+     - <project>: <where it stands, phases done of total>
+
+     ## Needs you
+     - <decisions outstanding, unapproved findings, blocked work>
+
+   Prefer themes and outcomes over a day-by-day recap.
+
+Content rules:
+- This is a STATUS channel for the user's codebases and assigned work. Ignore routine
+  background operations entirely.
+- Name concrete projects, phases and finding ids (e.g. CR-my-project-0014).
+- If there was no activity at all, say so in one line.
+- Do NOT log this run to the daily log file. Writing the report is the whole job.
+- Do not commit anything to git. Do not modify any other file.
+
+Your final response: the file path you wrote and the window it covers, in one line.

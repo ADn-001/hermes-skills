@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Never commit real project state. These skills operate on ledgers, gatelogs and
+# reports that name private projects, finding ids and machine paths; the skill
+# definitions belong in this repo, the state they operate on does not.
+ledger.md
+gatelog.md
+plan.md
+report.md
+daily-report.md
+weekly-report.md
+reports/
+codereview/
+scope.json
+
+# Secrets — these skills provision scheduled autonomous work, so a leaked token
+# here is a leaked key to that machinery.
+*.env
+.env
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# Scratch specs written during a sprint (they contain absolute local paths).
+docs/plans/*.tmp.md
+*.tmp
