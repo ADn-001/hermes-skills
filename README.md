@@ -136,6 +136,31 @@ projects rather than sweeping every ledger it can find, and it staggers its jobs
 agents never edit codebases at the same time. Read `nightly-support`'s SKILL.md before
 widening that scope.
 
+## If you add a skill: put the trigger words first
+
+Hermes truncates a skill's `description` to **60 characters** when it builds the skill
+index in the system prompt (`SKILL_PROMPT_DESC_LIMIT` in `agent/skill_utils.py`). That
+truncated line is all an agent has to go on when deciding which skill to load — so the
+name and the trigger phrases have to land inside the first 57 characters or they are
+simply invisible. Everything after that is still read once the skill *is* loaded.
+
+```
+daily-weekly-report    -> Daily and weekly report — "what happened today" / "give m...
+codebase-audit         -> Codebase audit / codereview — a read-only whole-codebase ...
+dev-sprint             -> Dev sprints: phased, resumable builds behind all-green te...
+nightly-support        -> Nightly support — turn approved audit findings into ticke...
+```
+
+Claude Code's cap is far larger (1,536 chars), so write to Hermes' rule: it is the binding
+one. Two related traps, both hit while writing these:
+
+- **An unquoted `": "` inside a description breaks the YAML.** A plain scalar ends at the
+  first colon-space, and the skill then loads with *no fields set* — silently, with no
+  error. `approved:true` is fine (no space); `report: today` is not. Quote the whole
+  description.
+- **`name` must match the directory name.** It overrides the directory in Hermes but is
+  display-only in Claude Code, so a mismatch shows up in only one harness.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Use them, change them, teach them to your own agents.

@@ -1,6 +1,6 @@
 ---
 name: dev-sprint
-description: Runs a phased, idempotent, multi-session dev workflow — recon, phase-by-phase planning with e2e test gates, one-phase-per-sprint implementation, and a test/debug loop until green — tracked in plan.md, gatelog.md, and report.md. Use this whenever the user wants to build or extend a feature via "dev sprints," "phased plan," "gatelog," or an autonomous/cron-driven multi-session build; also use it to resume an in-progress phased build (existing plan.md + gatelog.md in a project dir), or to kick one off from a natural-language idea, a spec/ticket, or a target project folder. Always check for an existing gatelog.md before planning from scratch — this skill is idempotent and must resume rather than replan when one is found.
+description: "Dev sprints: phased, resumable builds behind all-green test gates. Use whenever the user wants to build or extend a feature via \"dev sprints,\" \"phased plan,\" \"gatelog,\" or an autonomous/cron-driven multi-session build; to resume an in-progress phased build (existing plan.md + gatelog.md in a project dir); or to kick one off from a natural-language idea, a spec/ticket, or a target project folder. Always check for an existing gatelog.md before planning from scratch — this skill is idempotent and must resume rather than replan when one is found."
 ---
 
 # Dev Sprint
@@ -29,8 +29,8 @@ Read `references/file-formats.md` before creating or editing any of the three fi
    Do this by hand-listing the dir (`search_files` for `*.md`, or `ls`) and matching the
    names case-insensitively. Do **not** test for the literal lowercase paths only: projects
    created by older tooling use `PLAN.md`/`REPORT.md`, and a case-sensitive check reads
-   those as a fresh start and silently discards a completed plan. `my-other-project` on the
-   author's own machine is a live example — 16 phases, uppercase filenames.
+   those as a fresh start and silently discards a completed plan. A live project on the
+   author's own machine is a real example — 16 phases, uppercase filenames.
 
    Where the `tools/` scripts from this skill's repo are available, `gatelog_check.py locate
    <dir>` does this and additionally reports whether the gatelog is in the canonical dialect

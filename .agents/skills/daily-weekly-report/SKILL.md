@@ -1,6 +1,6 @@
 ---
 name: daily-weekly-report
-description: Maintains a rolling daily activity log that any hermes session or cron job appends a short SIGNIFICANT entry to at the end of its task cycle, and turns that log into two pre-written report files (a daily and a weekly) that are regenerated on a schedule and read back deterministically when the user asks. Two trigger modes in one skill — "daily report" and "weekly report" — typically invoked via Alexa ("what happened today" / "give me my weekly report") through the alexa-hermes-bridge, where the answer is a file read rather than a fresh model run. Use this whenever the user asks what happened today, this week, for a status update/report, or when another skill needs to know where/how to log its own end-of-cycle entry. Log status and progress on codebases and assigned work, not routine background operations.
+description: "Daily and weekly report — \"what happened today\" / \"give me my weekly report.\" Maintains the rolling daily activity log that other skills append to, and turns it into two pre-written report files that are regenerated on a schedule and read back deterministically. Use whenever the user asks what happened today, this week, or for a status update — or when another skill needs to know where and how to log its own end-of-cycle entry. Log status and progress, not routine operations."
 ---
 
 # Daily / Weekly Report

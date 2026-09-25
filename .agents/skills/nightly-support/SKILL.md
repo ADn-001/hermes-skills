@@ -1,6 +1,6 @@
 ---
 name: nightly-support
-description: Runs once daily (via a cron job the user sets up themselves) to scan the codebase-audit ledgers of ONE TO THREE explicitly scoped projects under /home/user/codereview/ for findings the user has approved (approved:true, status:new), groups related approved findings per project into fewer, larger tickets, writes each ticket in the same schema as a ledger entry, and provisions one dev-sprint cron job per project — spaced apart so two dev-sprints never run in parallel. Use this whenever the user says "nightly support," asks what got ticketed overnight, or wants to trigger/inspect the approved-findings-to-ticket-to-cron pipeline. This skill never picks up unapproved findings, never double-tickets already-assigned ones, never runs work for an unscoped project, and never lets two projects' sprints overlap.
+description: "Nightly support — turn approved audit findings into tickets and scheduled dev-sprint work. Scans the ledgers of ONE TO THREE explicitly scoped projects for entries the user approved, groups related findings into fewer larger tickets, and provisions one staggered dev-sprint cron per project. Use whenever the user says \"nightly support,\" asks what got ticketed overnight, or wants the approved-findings→ticket→cron pipeline triggered or inspected."
 ---
 
 # Nightly Support

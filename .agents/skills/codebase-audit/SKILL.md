@@ -1,6 +1,6 @@
 ---
 name: codebase-audit
-description: Runs a full, read-only, codebase-wide audit to find bugs, security risks, code smells, pitfalls, and gaps, recording results as entries in a persistent, idempotent findings ledger (stable IDs, survives re-runs) under /home/user/codereview/PROJECT_NAME/ledger.md. Each entry carries an approved flag the user flips by hand and a status lifecycle (new → assigned → ticketed → resolved/rejected) that the nightly-support skill later reads to generate tickets. Use this whenever the user asks for a "codereview," "code audit," "codebase audit," "full review," or references Hermes/an agent doing a read-only, whole-codebase review — this is distinct from requesting-code-review, which reviews a specific diff/PR rather than a whole codebase. Also trigger this automatically at the end of a dev-sprint run once all phases are complete (one-shot, to close the loop on ticket-originated work). Never edits code — this skill only reads and reports.
+description: "Codebase audit / codereview — a read-only whole-codebase review that records findings as entries in a persistent, idempotent ledger (stable IDs, survives re-runs) under /home/user/codereview/PROJECT_NAME/ledger.md. Use whenever the user asks for a \"codereview,\" \"code audit,\" \"codebase audit,\" or \"full review.\" Distinct from requesting-code-review, which reviews one diff/PR. Also triggers automatically at the end of a dev-sprint run once all phases are complete. Never edits code."
 ---
 
 # Codebase Audit
