@@ -59,6 +59,7 @@ for d in .agents/skills/*/; do n=$(basename "$d"); ln -sfn "$PWD/$d" ~/.claude/s
 | [`codebase-audit`](.agents/skills/codebase-audit/) | Read-only whole-codebase audit. Findings go to a persistent, append-and-merge ledger with stable IDs and a human-set `approved` flag. |
 | [`nightly-support`](.agents/skills/nightly-support/) | Turns approved findings into tickets and schedules the work. Scoped to 1–3 projects, one cron per project, staggered so two sprints never run at once. |
 | [`daily-weekly-report`](.agents/skills/daily-weekly-report/) | Rolling daily log plus two pre-written report files, so a status question is a file read rather than a fresh model run. |
+| [`idea-record`](.agents/skills/idea-record/) | The path from "record this idea" to a scheduled project: capture, brainstorm into a spec, list, and promote. Works alongside a voice bridge or standalone. |
 
 Each skill's `SKILL.md` is the entry point; its `references/` holds the exact file formats,
 schemas and prompt templates. Read the reference before creating or editing that skill's
