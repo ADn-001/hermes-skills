@@ -8,6 +8,89 @@ bugs that mattered were not typos. They were **loops that never terminate and lo
 never release**, in a system whose whole purpose is to run unattended across many sessions
 with no human present to notice.
 
+## v3 — git, GitHub, and the dev-dashboard ledger (2026-09-26)
+
+### 1. A cron that deleted itself while holding unpushed work
+
+`dev-sprint` self-destructs by design: 2 consecutive no-op runs with every phase
+complete means the job has served its purpose, so it provisions an audit and
+deletes itself. That was correct — and it had a hole in it. Nothing in the skill
+pushed or opened a PR, so the natural order of a final run was *delete the job*,
+and any commit that had not been pushed died with it. The job is gone, the work
+is gone, and the next session finds a phase marked done with nothing behind it.
+
+The fix is an ordering rule, stated three times (SKILL.md, `cron-prompt.md`, and
+`references/git-and-pr.md`) because an unattended session reads the prompt and
+never reads the skill:
+
+```
+final sync (commit → push → PR) → marker → audit → delete the cron
+   └─ any failure → STOP; do not delete the cron, leave it to retry
+```
+
+A failed push costs one scheduled no-op run. Deleting the job costs the sprint.
+That is not a close call, which is why the rule is unconditional.
+
+### 2. A phase could be marked done with no PR
+
+Nothing required the work to leave the machine. So the end-of-a-phase order is
+now **PR first, gatelog second** — a gatelog that says "done" with no PR is a
+gatelog claiming work exists that only exists on one disk.
+
+The pre-phase check is new too: clean tree, not on `main`, and the branch
+rebased onto `origin/main` **before** any code is written. A conflict found
+before a phase is cheap; one found after a phase of work is expensive, and one
+found at PR time is both.
+
+### 3. New projects were created without git
+
+"Create a new project dir" produced a directory with no repository, no remote,
+and no history — so a sprint's output could not be reviewed, rolled back, or
+handed over. New projects now `git init`, write a `.gitignore` before the first
+commit, and `gh repo create --private`. **Private by default**: a new project is
+unpublished work, and making it public is a decision the user makes, not a
+default this skill picks.
+
+### 4. The dashboard recorded intent that nothing consumed
+
+A `dev-dashboard` control panel shipped with all four phases working, and the
+autonomous skills had no idea it existed. The dashboard records `enabled: true`
+and the loop ignored it, so the panel controlled nothing.
+
+`references/dev-dashboard-ledger.md` is the new contract, and the three
+autonomous skills now read it at the point where they decide whether to
+provision. The load-bearing rule is unchanged and is restated: **the dashboard
+never creates a cron.** It records intent; the owning skill provisions its own
+job. Cron creation is the one irreversible operation in the system and it stays
+behind the skills that carry the guards.
+
+### 5. The `finished` state had a live footgun
+
+`nightly-support` provisions dev-sprint crons. With a project still
+sprint-enabled, it would provision a fresh job for a plan already complete —
+which finds no work twice, provisions a redundant audit, and deletes itself,
+charging a full audit every cycle. The terminal state now suppresses
+re-provisioning entirely, and the suppression is keyed to a generation
+fingerprint so **new phases clear it automatically**. Getting that backwards
+blocks all future work on the project instead, so both directions are specified
+and an unkeyed finish counts as `reopenable`, never `suppressed`.
+
+### 6. `dev-sprint:<project>` was not an autonomous name
+
+The provisioning examples named jobs `dev-sprint:<project>`. That name carries
+no `-auto-<uid>` token, so under the ownership contract it is **not ours** —
+the job the system created would be one the system was forbidden to touch. All
+provisioning examples now use `dev-sprint-<project>-auto-<uid>` with a real
+`uuid4()` suffix, and say why.
+
+### 7. Project paths
+
+Projects moved to `/home/user/projects/<name>/`. Every hardcoded path in the
+voice skills (`alexa-echo-channel`, `alexa-hermes-bridge`, `vox-relay-intents`)
+was updated, and `dev-sprint`'s Step 0 now looks there first — and treats an
+identical directory under the old location as the same project moved, rather
+than starting a second sprint on it.
+
 ## v2 — correctness, scoping, and pre-written reports (2026-09-25)
 
 ### Correctness: three failure modes that were silent

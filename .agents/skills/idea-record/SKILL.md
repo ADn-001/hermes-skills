@@ -195,6 +195,26 @@ So: say the idea is a rough capture, and offer to plan it properly now.
 
 ## Provisioning the dev-sprint job
 
+**Two rules apply to every job this skill provisions**, both from
+`dev-sprint/references/dev-dashboard-ledger.md`:
+
+1. **The name is `dev-sprint-<project>-auto-<uid>`** with a real
+   `uuid4().hex[:8]` suffix. The `-auto-` infix is the authorisation token that
+   marks a job as the loop's; a job without it is not ours, and the ownership
+   rules will correctly refuse to touch it.
+2. **Write the real name and `job_id` back into the dev-dashboard ledger** after
+   provisioning, replacing the `-auto-00000000` placeholder. Use `state.save()`
+   (validated, atomic) — never a text edit or a bare `json.dump`.
+
+**Check the ledger's finished state first.** Before provisioning, confirm the
+project is not `sprint.state: finished` with a `finished_generation` matching
+the current one — that combination **suppresses** provisioning entirely.
+Re-provisioning a finished project starts an infinite provision/delete loop that
+charges a full audit every cycle. A *differing* generation means new phases are
+waiting, and provisioning is correct.
+
+Also skip if the project is absent from the ledger or `path_absent` is true.
+
 Only in the spec + "kick off dev" path. Use the project's deterministic handoff script —
 it is what keeps a spoken sentence from ever being composed into a scheduled command:
 

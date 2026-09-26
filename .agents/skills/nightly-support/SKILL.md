@@ -131,11 +131,54 @@ Write the ticket using **the same schema as a ledger entry** (see `codebase-audi
 
 ## Step 4: Provision the dev-sprint cron — one per project, staggered
 
+**First: is this project already finished?** Read
+`dev-sprint/references/dev-dashboard-ledger.md` and check the project's `sprint`
+block:
+
+```python
+d = state.sprint_disposition(project["sprint"], current_generation)
+if d == "suppressed":   # do not provision
+```
+
+`suppressed` means `state: finished` **and** `finished_generation` equals the
+current generation — the finish still describes the plan on disk. **Stand down.**
+
+Do not provision a sprint for a plan that is already complete. Doing so starts
+the exact loop the terminal state exists to prevent: the fresh job finds no
+work, hits 2 consecutive no-op runs, provisions a redundant audit, and deletes
+itself — and the user pays for a full audit every cycle.
+
+`reopenable` (a *differing* `finished_generation`, or none at all) means the plan
+changed since the finish, so new phases are waiting. Provision normally.
+
+**Getting this backwards blocks all future work on a project** instead of
+wasting one audit, so both directions are specified and the unkeyed case counts
+as `reopenable`, never `suppressed`. When the answer is not obvious, re-read the
+ledger reference — do not guess.
+
+Also skip if the project is absent from the ledger, `path_absent` is true, or
+sprint scope is not enabled. Those are the user's decisions.
+
 Once the ticket is written:
-- Resolve the target project dir the same way `dev-sprint` does.
-- Provision a `dev-sprint` cron job against that project dir and ticket, using `cronjob`. Default interval: **every 3 hours** (`scope.json`'s `interval`). Only use a different interval if the user explicitly said so.
+- Resolve the target project dir the same way `dev-sprint` does. Project directories are under `/home/user/projects/<name>/`.
+- Provision a `dev-sprint` cron job against that project dir and ticket, using `cronjob`. Default interval: **every 3 hours** (`scope.json`'s `interval`, or the project's `interval` in the ledger). Only use a different interval if the user explicitly said so.
+- **Name it `dev-sprint-<project>-auto-<uid>`** with a real `uuid4().hex[:8]` suffix — not `dev-sprint:<project>`. The `-auto-` infix is the authorisation token that separates the loop's jobs from the user's own; a job without it is not ours and the ownership rules will (correctly) refuse to touch it. See `dev-sprint/references/dev-dashboard-ledger.md`.
 - **Arm the job with the skills the work needs** — a bare `--skill dev-sprint` job runs a whole sprint with no TDD, debugging or review tooling, which is the most common reason these jobs underperform. See `dev-sprint`'s `references/cron-prompt.md` for the exact flag list and the reasoning; in short: `dev-sprint`, `test-driven-development`, `systematic-debugging`, `codebase-inspection`, `requesting-code-review`, plus situational ones for the project.
 - Hand the ticket to `dev-sprint` exactly as if it were a natural-language spec handed off with no live back-and-forth — this is the autonomous chain, so `dev-sprint` should skip its brainstorming step and go straight to recon → plan → gatelog.
+- **Write the real job name and `job_id` back into the dashboard ledger**, replacing the `-auto-00000000` placeholder. Use `state.save()` so the write is validated and atomic — never a text edit or a bare `json.dump`.
+
+### Never provision a second sprint for a project that already has one
+
+Before creating, list jobs and filter to **owned** ones for this project:
+
+```python
+mine = ownership.owned_jobs(all_jobs)
+```
+
+**If two owned sprint jobs exist for one project, that is a bug, not a choice.**
+Pick neither, report it, and let the user resolve it — do not silently keep the
+one you find first. Never act on "the first dev-sprint job" or "the job for this
+project": a user-created job can share both the skill and the project name.
 
 ### Never run two sprints in parallel
 
