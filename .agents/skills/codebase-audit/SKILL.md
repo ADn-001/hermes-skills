@@ -20,7 +20,16 @@ A read-only, whole-codebase review that produces a persistent, append-and-merge 
 
 ## Step 1: Identify the project and load prior state
 
-1. Resolve the target project dir the same way `dev-sprint` does (given path, or a local dir matching the name/subject).
+0. **Check the dev-dashboard ledger first.** Read
+   `dev-sprint/references/dev-dashboard-ledger.md`. It is the control panel the
+   user steers the loop from, and this skill is a **reader** of it: it decides
+   which projects get audited, and when it provisions an audit cron it
+   provisions **its own** job, named `<skill>-<project>-auto-<uid>`. The
+   dashboard never creates a cron. If a project is absent from the ledger, or
+   `audit.enabled` is false, that is the user's decision — do not audit it
+   anyway. If it is listed and enabled but no job exists yet, this run is the one
+   that provisions it (see "Cron / recurring usage" below).
+1. Resolve the target project dir the same way `dev-sprint` does (given path, or a local dir matching the name/subject). Project directories are under `/home/user/projects/<name>/`.
 2. Check `/home/user/codereview/<project-name>/ledger.md`. If it exists, read it in full — every existing entry, its `status`, and its `approved` flag. This run is a **merge**, not a fresh write.
 3. If it doesn't exist, this is the first audit for this project — you'll create it fresh (still following the same schema).
 
@@ -89,6 +98,35 @@ A project can have a recurring codebase-audit cron set up two ways:
 - `nightly-support` triggers a one-shot run to close out resolved ledger entries after a ticket-originated `dev-sprint` finishes.
 
 Each cron call runs Steps 1–5 above exactly as an interactive invocation would — this skill behaves identically whether triggered by a human or a schedule.
+
+**When you provision, four things are not optional:**
+
+1. The name is `<skill>-<project>-auto-<uid>` with a real `uuid4().hex[:8]`
+   suffix. The `-auto-` infix is what marks the job as the loop's; without it
+   the ownership check excludes it, so the job you just created would be one
+   the system is forbidden to touch.
+2. The name shape alone is **necessary but not sufficient** — a job is ours only
+   if its `created_by` is `autonomous` as well. A user can name a job like ours
+   by accident, which is why the check is two facts.
+3. Filter to owned jobs before acting on any. Never "the first codebase-audit
+   job" or "the job for this project" — a user-created job can share both the
+   skill and the project name. `ownership.owned_jobs()` does the filtering.
+4. Write the **real** name and the job's `job_id` back into the ledger, replacing
+   the `-auto-00000000` placeholder the dashboard wrote. A job that exists but
+   is not in the ledger is invisible to the next run.
+
+```bash
+hermes cron create "every 10 hours" "<the audit prompt>" \
+    --name "codebase-audit-<project>-auto-<uid>" \
+    --workdir "/home/user/projects/<project>" \
+    --skill codebase-audit
+```
+
+Read `dev-sprint/references/dev-dashboard-ledger.md` for the full tool surface.
+
+**Delete by `job_id`, and only after `ownership.assert_solvable()` confirms the
+match is unambiguous and ours.** A self-destructing job deletes only its own
+id — a job that was replaced under it must never be removed by name collision.
 
 ## Logging to the daily report
 

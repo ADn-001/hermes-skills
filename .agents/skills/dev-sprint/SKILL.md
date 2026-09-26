@@ -22,6 +22,12 @@ Read `references/file-formats.md` before creating or editing any of the three fi
 
 ## Step 0: Resolve the target project dir (idempotency check — always do this first)
 
+0. **Where projects live.** Project directories are under `/home/user/projects/<name>/`.
+   Look there first when resolving a name to a path. If the name matches a
+   directory directly under `/home/user` (an older layout) *and* one under
+   `/home/user/projects`, they are the same project moved — use the `projects/`
+   one and note the relocation in the gatelog. Do not start a second sprint on
+   what is the same checkout.
 1. **If the user gave a path**, use it.
 2. **If no path was given**, look locally for a directory that matches the task's name or subject. If nothing plausible is found, create a new project dir (short kebab-case name derived from the task).
 3. **Inside that dir, locate `gatelog.md` and `plan.md` — CASE-INSENSITIVELY.**
@@ -80,6 +86,15 @@ Triggered whenever gatelog.md and plan.md already exist — whether called inter
 
 ## Dev Sprint (implementing one phase)
 
+**0. Git preflight — before writing any code.** Read
+`references/git-and-pr.md`. In short: the working tree must be clean
+(`git status --porcelain` empty), the current branch must not be `main`, and the
+branch must be rebased onto `origin/main` so conflicts surface *now* rather
+than at PR time. A dirty tree means an earlier phase lied about finishing —
+report it and stop rather than sweeping it into this phase's commit. A project
+with no git at all is a fresh-project case: `git init`, write a `.gitignore`,
+commit, then `gh repo create --private`.
+
 1. Pull the phase's task list from plan.md.
 2. Implement each task.
 3. Write an end-to-end test suite for this phase (plus whatever regression tests are needed to make sure this phase didn't break earlier ones). Tests should encode the phase's e2e test gate from plan.md as closely as possible.
@@ -90,7 +105,15 @@ Triggered whenever gatelog.md and plan.md already exist — whether called inter
 1. Run the phase's e2e test suite plus the full regression suite.
 2. If anything fails: diagnose, fix, and re-run. Loop this step until everything is green.
 3. Log any notable quirks, gotchas, or discoveries along the way — these go into the phase's findings section in gatelog.md, not lost to the session's own memory. This is what lets the *next* agent (possibly a fresh cron session with zero conversational context) avoid re-discovering the same landmine.
-4. Once all green: update `gatelog.md` immediately — mark the phase done, fill in its findings section, and set the "next phase" pointer. Do this before ending the sprint, not as an afterthought.
+4. **All green → land the work, then update the gatelog.** Read
+   `references/git-and-pr.md`. Commit on the sprint branch, push it, and open
+   the PR (or add a comment to the existing PR for this branch) with the
+   phase's gate evidence. Record the PR URL in that phase's findings section.
+   **Only then** mark the phase done and move the next-phase pointer.
+   The order is not cosmetic: a gatelog that says "done" with no PR is a
+   gatelog claiming work exists when it exists on exactly one disk. Never push
+   to `main` and never merge — the user merges.
+5. Once all green and the work is pushed: update `gatelog.md` immediately — mark the phase done, fill in its findings section, and set the "next phase" pointer. Do this before ending the sprint, not as an afterthought.
 
 ## Findings section (per phase, in gatelog.md)
 
@@ -143,6 +166,36 @@ If the user wants this run autonomously across repeated scheduled calls (e.g. a 
 ## When all phases are complete
 
 Check gatelog.md's "Next phase to work on" line. Once it reads "All phases complete," this skill's own implementation work is done. **The audit handoff below is one-shot per completion, not per invocation** — see the guard before you trigger anything.
+
+### The final sync — push everything BEFORE the cron deletes itself
+
+**A cron that deletes itself while holding unpushed work is a silent data-loss
+bug.** The job is gone, the work is gone, and the next session finds an empty
+phase marked done. This is the single most important ordering rule in this
+skill, and it exists because the self-destruct is *designed* to delete the job.
+
+So when this run is the one that reaches 2 consecutive no-op runs with every
+phase complete, the sequence is strictly ordered:
+
+```
+final sync:  git add -A → commit → push → PR open/update
+   └─ ANY step fails → STOP HERE. Do not write the marker. Do not provision
+      the audit. Do NOT delete the cron. Report the failure and leave the job
+      alive so the next run retries.
+marker:      write the generation-fingerprint marker
+provision:   create the audit cron
+destroy:     delete this cron          ← last, and only if everything above worked
+```
+
+A failed push means the work exists on exactly one machine. Keeping a cron alive
+to retry costs one scheduled no-op run. Deleting it costs the sprint. That is
+not a close call, so the rule is unconditional — do not "delete it now and push
+later", there is no later.
+
+Read `references/git-and-pr.md` for the commands and the full ordering. If this
+project has no git repo at all, there is nothing to push and no PR to open — say
+so plainly in the log entry and the daily report rather than reporting a
+successful sync that did not happen.
 
 ### The completion-audit guard (read this before triggering an audit)
 
