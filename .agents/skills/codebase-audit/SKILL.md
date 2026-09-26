@@ -9,7 +9,8 @@ A read-only, whole-codebase review that produces a persistent, append-and-merge 
 
 ## Where things live
 
-- All ledgers live under one shared root: `/home/user/codereview/<project-name>/ledger.md` — one ledger per project, named to match the project dir under `/home/user/`.
+- All ledgers live under one shared root: `/home/user/codereview/<project-name>/ledger.md` — one ledger per project, named to match the project dir under `/home/user/projects/`.
+- **Resolve `<project-name>` from the dashboard ledger, not by guessing.** The authoritative location of each project is the `"path"` field in `/home/user/projects/dev-dashboard/state.json`. Read it with the library (`state.load(...)`), never by hand. Do not assume a project sits directly under `/home/user/` — that was the pre-2026-09-26 layout, and the audit root is the one directory that did **not** move. Note that project names are real directory names and may contain uppercase (e.g. `Nanites-harness`); the ledger name must match the project name exactly, and the codereview subdirectory is the same name.
 - Read `references/ledger-schema.md` before creating or updating a ledger — it has the exact per-entry field schema and merge rules. Don't freewheel the schema; do freewheel the `category`/`severity` labels you assign within it.
 
 ## When to run
