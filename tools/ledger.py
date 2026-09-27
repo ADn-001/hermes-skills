@@ -45,7 +45,25 @@ REQUIRED_FIELDS = (
     "suggested_fix", "covered_by_test", "approved", "status", "first_seen",
     "last_seen", "linked_ticket", "linked_cron_job", "overlaps_active_phase",
 )
-ID_RE = re.compile(r"^CR-([A-Za-z0-9._-]+?)-(\d{4})$")
+#: The two id namespaces a ledger may contain.
+#:
+#: ``CR-`` is a *finding* — something an audit discovered. ``TK-`` is a
+#: *ticket* — a unit of work a human or a nightly run decided to do. They are
+#: separate namespaces with separate counters on purpose: a ticket is a
+#: response to findings, not a finding, and sharing one sequence would mean
+#: creating a ticket renumbers nothing but *looks* like it competes with the
+#: findings it came from. It also means the audit's own numbering is never
+#: perturbed by ticket activity, which is what makes "the 53 existing
+#: entries are untouched" a checkable claim rather than a hope.
+PREFIX_CR = "CR"
+PREFIX_TK = "TK"
+PREFIXES = (PREFIX_CR, PREFIX_TK)
+
+#: ``<PREFIX>-<project>-NNNN``. The project segment is lazy and the number is
+#: anchored at exactly four digits, which is what lets a project name itself
+#: contain hyphens (``CR-alexa-hermes-0053``) without the regex guessing
+#: where the project ends.
+ID_RE = re.compile(r"^(" + "|".join(PREFIXES) + r")-([A-Za-z0-9._-]+?)-(\d{4})$")
 DEFAULT_OLDER_THAN_HOURS = 26
 
 
@@ -214,7 +232,8 @@ def validate(entries):
             if not m:
                 problems.append(Problem(
                     eid, _line_of(e, "id") or e.line,
-                    f"id does not match CR-<project>-NNNN: {raw_id!r}", "id"))
+                    f"id does not match {'/'.join(PREFIXES)}"
+                    f"-<project>-NNNN: {raw_id!r}", "id"))
             else:
                 if raw_id in seen:
                     problems.append(Problem(
@@ -328,35 +347,51 @@ def cmd_find(entries, args):
     return 0
 
 
-def _project_of(entries, override=None):
+def _project_of(entries, override=None, prefix=PREFIX_CR):
+    """The project this ledger belongs to.
+
+    Only ids in ``prefix``'s namespace are counted. A ledger holding both
+    findings and tickets infers the project from the *findings*, because that
+    is the namespace the audit tool owns; inferring it from a ticket id would
+    mean one ``TK-`` entry could redirect every subsequent id.
+    """
     if override:
         return override
     counts = {}
     for e in entries:
         if isinstance(e.id, str):
             m = ID_RE.match(e.id)
-            if m:
-                counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+            if m and m.group(1) == prefix:
+                counts[m.group(2)] = counts.get(m.group(2), 0) + 1
     if not counts:
-        raise LedgerError("cannot infer a project name: ledger has no CR-* ids; "
-                          "pass --project")
+        raise LedgerError(
+            "cannot infer a project name: ledger has no %s-* ids; "
+            "pass --project" % prefix)
     return max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
 
 
-def next_id(entries, project=None):
-    """Next unused CR-<project>-NNNN. Max over ALL entries, never reused."""
-    project = _project_of(entries, project)
+def next_id(entries, project=None, prefix=PREFIX_CR):
+    """Next unused ``<prefix>-<project>-NNNN``. Max over that namespace only.
+
+    The max is taken over entries **sharing both the prefix and the project**.
+    That is the whole point of the change: with one shared counter, minting a
+    ticket would return ``CR-…-0054`` and a ticket would look like a finding.
+    Scoping to the namespace means each sequence advances only on its own
+    entries, and -- because the max is never decremented and ids are never
+    reused -- a deleted entry's number is not handed out again.
+    """
+    project = _project_of(entries, project, prefix=prefix)
     highest = 0
     for e in entries:
         if isinstance(e.id, str):
             m = ID_RE.match(e.id)
-            if m and m.group(1) == project:
-                highest = max(highest, int(m.group(2)))
-    return f"CR-{project}-{highest + 1:04d}"
+            if m and m.group(1) == prefix and m.group(2) == project:
+                highest = max(highest, int(m.group(3)))
+    return "%s-%s-%04d" % (prefix, project, highest + 1)
 
 
 def cmd_next_id(entries, args):
-    print(next_id(entries, args.project))
+    print(next_id(entries, args.project, prefix=args.prefix))
     return 0
 
 
@@ -653,6 +688,10 @@ def build_parser():
     n = sub.add_parser("next-id", help="next unused id (never reused)")
     n.add_argument("ledger")
     n.add_argument("--project")
+    n.add_argument("--prefix", choices=PREFIXES, default=PREFIX_CR,
+                   help="id namespace: CR- for a finding, TK- for a ticket. "
+                        "Each has its own counter, so minting a ticket never "
+                        "advances the finding sequence (default: CR)")
 
     st = sub.add_parser("stats", help="counts by status/severity/approval")
     st.add_argument("ledger")
