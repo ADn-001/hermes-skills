@@ -137,8 +137,53 @@ At the end of every run, append a short entry to today's daily report file (see 
 
 Read `references/agents-and-tools.md` before scanning — it's the canonical, up-to-date mapping of subtask → agent role → skills/tools for this entire skill family (dev-sprint, codebase-audit, nightly-support, daily-weekly-report), and includes the full expanded pool (`clarify`, `computer_use`, `github`, `simplify-code`, `spike`, `architecture-diagram`, and the rest). If dev-sprint's local copy of this reference ever disagrees with this one, treat this one as canonical.
 
+## Opening a ticket from a live session
+
+When the user says something like *"open a ticket for this error"*, *"file
+this"*, or *"make a ticket out of that"* — in a **live session with the user
+present** — this is what happens.
+
+**Investigate first, then propose, then wait.** In that order, always:
+
+1. **Investigate.** Reproduce it or read the code until you can state what is
+   wrong in one sentence. A ticket you cannot explain is a ticket nobody will
+   act on.
+2. **Propose.** Show the user, in the chat:
+   - the project it belongs to and the id the server *would* mint
+     (`GET /api/projects/<project>/tickets/next-id` — a preview, not a
+     reservation);
+   - the title, the severity you would pick **and why**;
+   - the description you would file, in full. Not a summary of it.
+3. **Wait.** Ask for a yes or a no, and do nothing until you get one. "No" is
+   a complete answer — file nothing, change nothing, and do not ask twice.
+
+**Never file without the yes.** Not "the user seemed to want it", not "this
+is obviously a bug", not "I'll file it and they can delete it". An LLM
+judging "is this a novel, in-scope bug" and filing unattended will eventually
+put something wrong into a ledger the user treats as ground truth, and a
+ledger that is quietly wrong is worse than one that is incomplete: every
+later run reads it as fact.
+
+**This rule is structural, not a matter of tone.** The write lives in the
+dashboard (`POST /api/projects/<project>/tickets`) and in `lib/tickets.py`,
+and neither is reachable from this skill — you have no path to disk that
+bypasses the user's yes. If you find yourself wanting to "just add it to the
+ledger", that is the moment to propose instead.
+
+**The id is never yours to choose.** It comes from the server, minted inside
+its write lock. A `TK-` id you invent can collide with a real one, and a
+`CR-` id would put a ticket in the finding namespace, which is exactly what
+the two namespaces exist to keep apart.
+
+**The user may also file it themselves** from the dashboard's Findings tab,
+which is the same endpoint. If they say "I'll do it in the dashboard", point
+them there and stop — do not file it as well.
+
 ## What this skill never does
 
 - Never edits, fixes, or refactors code — read-only, always.
 - Never flips the `approved` flag itself — that's the user's call, by hand, in the ledger file.
-- Never writes a ticket or spec — that's `nightly-support`, and only for entries the user has already approved.
+- Never writes a ticket unattended. A live-session ticket is *proposed* and
+  waits for a yes; an autonomous run never proposes at all, because there is
+  nobody to answer. Tickets for approved findings are `nightly-support`'s job,
+  and it enqueues a task rather than provisioning anything.
