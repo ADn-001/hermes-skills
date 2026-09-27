@@ -18,7 +18,7 @@ in between, so the user never has to decide which of several tools to reach for.
         │  "list my ideas"                   → one line each
         ▼
   "let's start <name>" ──►  is it a spec?
-        ├── yes ──► review it,  OR  kick off dev (ask interval, default 3h)
+        ├── yes ──► review it,  OR  kick off dev (enqueue a dev-sprint task)
         └── no  ──► hand the raw sketch to dev-sprint live; it can structure it
 ```
 
@@ -172,13 +172,17 @@ python3 "$CORE" idea start <slug> --json     # is_spec: true|false
 Tell the user it is already a spec, then offer the two ways forward and let them pick:
 
 - **Review it** — walk them through what it says, section by section.
-- **Kick off dev** — this schedules real autonomous work, so before creating anything:
+- **Kick off dev** — this queues real autonomous work, so before enqueueing anything:
   - Confirm the idea by name, so a mis-resolved match can't start the wrong project.
-  - Ask for the interval, offering the **3h default** explicitly. Interval grammar is
-    closed: `3h`, `90m`, `1h`. An unrecognised answer becomes the default — say so
-    rather than silently guessing.
-  - Provision it (below), then **log to the daily report** — this is the one mode that
-    does, because it creates scheduled autonomous work the user needs to know about.
+  - **Do not ask for an interval.** The old flow asked, because each idea got its own
+    cron and cadence was the one thing that made that possible. There is one shared loop
+    now, running at `cadence.loop_minutes`, and the queue decides what is next. Asking
+    for a number and then ignoring it would be worse than not asking: the user would
+    believe they had chosen when they had not. If they want a different cadence, that is
+    a change to the shared loop made in the dashboard's Settings tab, and it is theirs to
+    make, not a per-idea decision.
+  - Enqueue it (below), then **log to the daily report** — this is the one mode that
+    does, because it queues autonomous work the user needs to know about.
 
 ### If it is a raw sketch (`status: captured`)
 
@@ -193,32 +197,62 @@ work Mode 2 does, continued rather than repeated.
 
 So: say the idea is a rough capture, and offer to plan it properly now.
 
-## Provisioning the dev-sprint job
+## Queueing the dev-sprint task
 
-Only in the spec + "kick off dev" path. Use the project's deterministic handoff script —
-it is what keeps a spoken sentence from ever being composed into a scheduled command:
+**This skill never creates a cron job.** Not for an idea, not for a "quick one",
+not when the queue looks slow. One shared loop drains the queue; a second job
+runs the same work twice, and two agents editing one machine contend for CPU,
+memory and model quota. Enqueueing is also *safer* than the old flow: the loop
+is armed once by the user, so a mistake here costs a queue entry rather than a
+scheduled job nobody remembers creating.
 
-```bash
-"$BRIDGE_ROOT"/scripts/dev-sprint-handoff.sh <project-dir> <interval>
+`state.json` has exactly one writer, and `state.save()` is that path. Load,
+append one task, save:
+
+```python
+import sys; sys.path.insert(0, "/home/user/projects/dev-dashboard")
+from lib import state
+
+path = state.state_path()
+doc = state.load(path)
+doc.setdefault("tasks", {})["dev-sprint-%03d" % _next_index(doc)] = {
+    "kind": "dev-sprint",
+    "project": "<project>",
+    "title": "<the idea title>",
+    "origin_id": "<idea id>",
+    "source": "idea-record",
+    "state": "idle",
+    "enqueued_at": _now_iso(),
+}
+state.save(path, doc)   # normalise → validate → temp file → os.replace
 ```
 
-The idea command does this for you, including the project directory, the copy of the
-spec, the status flip and the rollback if provisioning fails:
+Read `dev-sprint`'s `references/dev-dashboard-ledger.md` for the exact task
+record and the id-derivation rule. **A successful return means the task is in the
+ledger** — `save()` validates and refuses an invalid document. Never hand-edit
+`state.json` and never write a bare `json.dump`; a partial write there takes down
+every reader, including the running dashboard.
 
-```bash
-python3 "$CORE" idea start <slug> <interval> --json
-```
+**Check the project's finished state first.** Before enqueueing, confirm the
+project is not `sprint.state: finished` with a `finished_generation` matching the
+current one — that combination **suppresses** enqueueing entirely. Re-enqueueing a
+finished project starts a loop that finds no work, runs to the terminal state, and
+charges a full audit every cycle. A *differing* generation means new phases are
+waiting, and enqueueing is correct. `dev-sprint`'s
+`references/dev-dashboard-ledger.md` documents `state.sprint_disposition()`.
 
-It exits **3** and changes nothing if the idea is still a sketch — that refusal is the
-safety property, not an error to work around. It creates one project directory per idea
-(ideas are new work, so they get their own sprint dir) and copies the spec in as
-`SPEC.md`. Report the job name and schedule back to the user.
+Also skip if the project is absent from the ledger or `path_absent` is true.
+
+Only the spec + "kick off dev" path enqueues. A raw sketch still cannot be queued:
+the loop needs a plan to plan from and would otherwise invent the design unattended
+with nobody to object. For a sketch, load `dev-sprint` into this live session and
+hand it off, as above.
 
 ## Logging
 
 Log to the daily report (`daily-weekly-report` format) in **exactly one** case: when a
-dev-sprint job is provisioned from an idea. That is a project milestone and the user
-needs to know autonomous work now exists.
+dev-sprint task is enqueued from an idea. That is a project milestone and the user
+needs to know autonomous work is now queued.
 
 Do not log a bare idea capture, a brainstorming session, or a list request. An idea
 someone had while making coffee is not a status update, and a board that logs every one
@@ -231,7 +265,9 @@ prevent.
   conversation, a dead provider or a user who changes their mind must not cost the idea.
 - **Never overwrite an idea file.** Collisions get `-2`, `-3`.
 - **Never invent certainty in a spec.** Unknowns go under `## Open questions`.
-- **Never create a cron job without an explicit "yes, start it" and a stated interval.**
-  Scheduling autonomous coding is the one irreversible thing this skill does.
+- **Never create a cron job.** Not with a "yes, start it", not with any interval, not
+  ever. This skill enqueues tasks; the shared loop is the user's to arm.
+- **Never enqueue without an explicit "yes, start it".** Queuing autonomous coding is
+  the one consequential thing this skill does.
 - **One phase per session, one idea per file.** Don't merge two ideas into one document.
 - **This skill never implements anything.** Planning ends where `dev-sprint` begins.

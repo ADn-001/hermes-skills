@@ -63,6 +63,6 @@ done
 
 ## These skills are standalone
 
-Nothing in them depends on the Alexa bridge. a voice bridge wires them in by name (the
+Nothing in them depends on the Alexa bridge. `alexa-hermes` wires them in by name (the
 relay loads one with `hermes chat -s <skill-name>`), so they work in any Hermes session on
 the machine, not only the voice one.

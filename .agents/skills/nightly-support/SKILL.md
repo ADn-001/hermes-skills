@@ -1,6 +1,6 @@
 ---
 name: nightly-support
-description: "Nightly support — turn approved audit findings into tickets and scheduled dev-sprint work. Scans the ledgers of ONE TO THREE explicitly scoped projects for entries the user approved, groups related findings into fewer larger tickets, and provisions one staggered dev-sprint cron per project. Use whenever the user says \"nightly support,\" asks what got ticketed overnight, or wants the approved-findings→ticket→cron pipeline triggered or inspected."
+description: "Nightly support — turn approved audit findings into tickets and queued dev-sprint work. Scans the ledgers of ONE TO THREE explicitly scoped projects for entries the user approved, groups related findings into fewer larger tickets, and enqueues one dev-sprint task per project for the shared loop to pick up. Use whenever the user says \"nightly support,\" asks what got ticketed overnight, or wants the approved-findings→ticket→cron pipeline triggered or inspected."
 ---
 
 # Nightly Support
@@ -20,10 +20,10 @@ codebase-audit ledger (approved:true, status:new)
    check no dev-sprint already in flight for this project  ──▶ if in flight: skip, wait for next run
         │
         ▼
-   provision ONE dev-sprint cron per project, staggered (see Step 4)
+   enqueue ONE dev-sprint task per project into the shared queue (see Step 4)
         │
         ▼
-   mark ledger entries: status=assigned → ticketed, linked_ticket, linked_cron_job set
+   mark ledger entries: status=assigned → ticketed, linked_ticket set
 ```
 
 ## Scope: this skill is deliberately narrow
@@ -46,7 +46,6 @@ provision a burst of concurrent sprints on a machine that can only carry one.
 {
   "projects": ["my-project"],
   "max_projects": 3,
-  "interval": "3h"
 }
 ```
 
@@ -54,7 +53,6 @@ provision a burst of concurrent sprints on a machine that can only carry one.
   `/home/user/codereview/`, i.e. ledger paths `/home/user/codereview/<name>/ledger.md`.
 - **`max_projects`** — hard cap. A fourth project is refused, not silently queued. Raise
   the cap deliberately if the user wants more.
-- **`interval`** — the dev-sprint cron cadence, default `3h`.
 
 **How the scope is chosen when it doesn't exist yet:**
 
@@ -109,65 +107,125 @@ python3 tools/ledger.py stale-assigned /home/user/codereview/<project>/ledger.md
 An `assigned` entry older than that with no `linked_ticket` is not in-flight work; it is
 the residue of a crashed run. Treat the project as clear and **say so explicitly in the
 daily report** ("recovered project X: N entries were stranded in `assigned` since
-<date>, no ticket and no cron job existed"), so a stranded project is visible rather than
-quietly re-adopted. Then proceed with it normally. Do the same for a `ticketed` entry
-whose `linked_cron_job` is null — the ticket exists but the job that was to implement it
-does not.
+<date>, no ticket and no queued task existed"), so a stranded project is visible rather
+than quietly re-adopted. Then proceed with it normally. Do the same for a `ticketed`
+entry with no task in the dashboard queue — the ticket exists but nothing is scheduled to
+implement it.
 
-Never re-claim entries that a *live* cron owns. The 26-hour default is deliberately
-generous: it spans a full day of 3-hour cycles, so ordinary slow work is never mistaken
-for a crash.
+Never re-claim entries that a *running* task owns. The 26-hour default is deliberately
+generous: it spans a full day of `loop_minutes` cycles, so ordinary slow work is never
+mistaken for a crash.
 
 ## Step 3: Group and write the ticket
 
 Group the qualifying findings for a project into **fewer, larger tickets** rather than one ticket per finding — by file or subsystem, whichever grouping makes for a coherent, independently-plannable unit of work. Don't force unrelated findings into one ticket just to minimize count; a project with two unrelated approved findings (say, one security fix in auth and one dead-code cleanup in startup) should become two tickets, not one.
 
-One project may yield several tickets, but see Step 4's stagger rule: a project gets
-**one dev-sprint cron**, which works its ticket queue in order. Write the extra tickets to
-disk and link them, but let a single cron pick them up sequentially — two sprints on the
+One project may yield several tickets, but see Step 4's rule: a project gets
+**one queued dev-sprint task**, which the loop works in order. Write the extra tickets to
+disk and link them, but let a single task pick them up sequentially — two sprints on the
 same codebase in parallel is how two agents end up editing the same file.
 
 Write the ticket using **the same schema as a ledger entry** (see `codebase-audit`'s `references/ledger-schema.md`) — this is what lets `dev-sprint`'s "Starting fresh" step consume it directly as its input spec without a translation step. A grouped ticket is effectively a small collection of ledger entries bundled with a short cover summary explaining how they relate; write it as a `references/ticket-format.md`-shaped doc (see that reference for the exact shape) at `/home/user/codereview/<project-name>/tickets/<ticket-id>.md`.
 
-## Step 4: Provision the dev-sprint cron — one per project, staggered
+## Step 4: Enqueue the dev-sprint task — one per project, no cron
+
+**First: is this project already finished?** Read
+`dev-sprint/references/dev-dashboard-ledger.md` and check the project's `sprint`
+block:
+
+```python
+d = state.sprint_disposition(project["sprint"], current_generation)
+if d == "suppressed":   # do not enqueue
+```
+
+`suppressed` means `state: finished` **and** `finished_generation` equals the
+current generation — the finish still describes the plan on disk. **Stand down.**
+
+Do not enqueue a sprint for a plan that is already complete. Doing so starts the
+exact loop the terminal state exists to prevent: the fresh task finds no work,
+hits 2 consecutive no-op runs, and triggers a redundant audit — and the user
+pays for a full audit every cycle.
+
+`reopenable` (a *differing* `finished_generation`, or none at all) means the plan
+changed since the finish, so new phases are waiting. Enqueue normally.
+
+**Getting this backwards blocks all future work on a project** instead of
+wasting one audit, so both directions are specified and the unkeyed case counts
+as `reopenable`, never `suppressed`. When the answer is not obvious, re-read the
+ledger reference — do not guess.
+
+Also skip if the project is absent from the ledger, `path_absent` is true, or
+sprint scope is not enabled. Those are the user's decisions.
 
 Once the ticket is written:
-- Resolve the target project dir the same way `dev-sprint` does.
-- Provision a `dev-sprint` cron job against that project dir and ticket, using `cronjob`. Default interval: **every 3 hours** (`scope.json`'s `interval`). Only use a different interval if the user explicitly said so.
-- **Arm the job with the skills the work needs** — a bare `--skill dev-sprint` job runs a whole sprint with no TDD, debugging or review tooling, which is the most common reason these jobs underperform. See `dev-sprint`'s `references/cron-prompt.md` for the exact flag list and the reasoning; in short: `dev-sprint`, `test-driven-development`, `systematic-debugging`, `codebase-inspection`, `requesting-code-review`, plus situational ones for the project.
-- Hand the ticket to `dev-sprint` exactly as if it were a natural-language spec handed off with no live back-and-forth — this is the autonomous chain, so `dev-sprint` should skip its brainstorming step and go straight to recon → plan → gatelog.
+- Resolve the target project dir the same way `dev-sprint` does. Project directories are under `/home/user/projects/<name>/`.
+- **Enqueue the work as a task in the dashboard ledger, then return.** This skill does not create, arm, schedule, stagger or name a cron job. It never did that safely under a shared loop, and it does not do it now.
 
-### Never run two sprints in parallel
+#### How to enqueue
 
-Multiple scoped projects means multiple crons, and two agents editing codebases at the
-same time on one machine will contend for CPU, memory, model quota and — if the projects
-share a checkout or a virtualenv — corrupt each other's state. **Stagger them.**
+`state.json` has exactly one writer — the dashboard server's own save path — and
+`state.save()` is that path. Load, append one task, save:
 
-Give each project a distinct phase of the interval, so no two jobs start together:
+```python
+import sys; sys.path.insert(0, "/home/user/projects/dev-dashboard")
+from lib import state
 
-| Project (in `scope.json` order) | Cron schedule |
-|---|---|
-| first | `<interval>` — e.g. `0 */3 * * *` |
-| second | the interval, offset into it — e.g. `45 1-22/3 * * *` |
-| third | the remainder — e.g. `30 2-23/3 * * *` |
+path = state.state_path()
+doc = state.load(path)
+doc.setdefault("tasks", {})["dev-sprint-%03d" % _next_index(doc)] = {
+    "kind": "dev-sprint",
+    "project": "<project>",
+    "title": "<the ticket title>",
+    "origin_id": "TICKET-2026-09-25-auth-webhook-hardening",
+    "source": "nightly-support",
+    "state": "idle",
+    "enqueued_at": _now_iso(),
+}
+state.save(path, doc)   # normalise → validate → temp file → os.replace
+```
 
-Concretely: divide the interval into equal slices and give project *N* the *N*th slice, so
-with a 3h interval the three projects start at :00, :20 and :40 past alternating hours.
-With more projects than slices, extend the interval rather than overlapping — three
-projects on a 3h interval becomes a 90-minute interval with one start per slice, not three
-jobs racing.
+Read `dev-sprint`'s `references/dev-dashboard-ledger.md` for the exact task
+record and the id-derivation rule; it is the same one the dashboard itself
+writes, and a hand-rolled id that collides with an existing task is a lost
+update. **`state.save()` validates and refuses an invalid document, so a
+successful return means the task is in the ledger.** Do not hand-edit
+`state.json` and do not write a bare `json.dump` — a partial write there takes
+down every reader.
 
-Use `cronjob`'s scheduling support for this. Two named jobs must never share a start
-minute; if a slot is already taken, push to the next free slice and say so in the report.
-This also gives a second, free safety property: jobs landing in different slices rarely
-collide with each other's *previous* run, so a slow phase doesn't cascade.
+**The interval is not yours to choose.** It was a per-project cron cadence, and
+under one shared loop there is no per-project cadence to set: the loop runs at
+`cadence.loop_minutes` and the queue decides what is next. A project that
+genuinely needs different timing is a user decision, made in the Settings tab,
+not something to encode by provisioning a second job.
 
-Name jobs `dev-sprint:<project>` so they're identifiable in `hermes cron list` and
-removable by name.
+Hand the ticket to `dev-sprint` as a natural-language spec with no live
+back-and-forth — this is the autonomous chain, so `dev-sprint` skips its
+brainstorming step and goes straight to recon → plan → gatelog.
+
+### Never provision a cron from this skill, under any conditions
+
+This is the rule that replaced the old provisioning step, and it is absolute:
+
+- **No `cronjob` create.** Not for a project, not for a "just this once", not
+  because the queue looks slow. One shared loop drains the queue; a second job
+  runs the same work twice.
+- **No per-project cadence.** Two jobs on one machine contend for CPU, memory
+  and model quota, and if the projects share a checkout or a virtualenv they
+  corrupt each other's state. The queue serialises them, which is the entire
+  reason it exists.
+- **No naming and arming.** The `-auto-<uid>` infix, the skill flag list and the
+  start-minute staggering all belonged to the one-cron-per-project design and
+  have no meaning here. The loop is armed once, by the user, through the
+  dashboard's apply flow.
+
+If a run finds two owned sprint jobs for one project, that is a **bug, not a
+choice** — report it and let the user resolve it. Do not silently keep the one
+you find first, and never act on "the first dev-sprint job": a user-created job
+can share both the skill and the project name.
 
 ## Step 5: Update the ledger
 
-Mark every grouped entry: `status: assigned` immediately (closes the race window), then `status: ticketed` once the cron job is actually provisioned, with `linked_ticket` set to the ticket's path/ID and `linked_cron_job` set to the job name.
+Mark every grouped entry: `status: assigned` immediately (closes the race window), then `status: ticketed` once `state.save()` has returned, with `linked_ticket` set to the ticket's path/ID. There is no `linked_cron_job` to set — no cron was created, and inventing a job name that does not exist is how the next run goes looking for work that was never scheduled.
 
 Use the surgical rewriter rather than a text edit, so approvals and every other field
 survive untouched:
@@ -175,14 +233,14 @@ survive untouched:
 ```bash
 python3 tools/ledger.py set-status /home/user/codereview/<project>/ledger.md \
     --id CR-<project>-0007 --status ticketed \
-    --ticket TICKET-2026-09-25-auth-webhook-hardening --cron dev-sprint:<project>
+    --ticket TICKET-2026-09-25-auth-webhook-hardening
 ```
 
 If a run dies between the two states, Step 2's `stale-assigned` check recovers it.
 
 ## Step 6: Log clearly — this is the safety valve
 
-Because this chain provisions autonomous coding + cron scheduling with no human in the loop after the original approval, always append a clear entry to today's daily report file (see `daily-weekly-report`) summarizing exactly what happened this run: which projects were in scope, what got ticketed (with ticket IDs), what cron jobs were created, and what got skipped and why (already in flight, nothing approved, stranded-and-recovered, out of scope). This is the only place the user sees this pipeline's activity without having to go dig through ledgers — don't skip it, even on a run where nothing happened ("nightly-support: scope = my-project; nothing approved and new this cycle" is a valid, useful entry).
+Because this chain enqueues autonomous coding with no human in the loop after the original approval, always append a clear entry to today's daily report file (see `daily-weekly-report`) summarizing exactly what happened this run: which projects were in scope, what got ticketed (with ticket IDs), what tasks were enqueued, and what got skipped and why (already in flight, nothing approved, stranded-and-recovered, out of scope). This is the only place the user sees this pipeline's activity without having to go dig through ledgers — don't skip it, even on a run where nothing happened ("nightly-support: scope = my-project; nothing approved and new this cycle" is a valid, useful entry).
 
 Keep it to the significant: this is a status channel for codebases and assigned work, not
 a per-run heartbeat. One entry per project that did something, plus a single line naming
