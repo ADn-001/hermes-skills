@@ -275,9 +275,22 @@ class ValidateTest(unittest.TestCase):
         self.assertTrue(any("not an ISO" in str(p) for p in probs))
 
     def test_bad_id_shape_is_rejected(self):
+        """The message names both namespaces.
+
+        It used to say "CR-<project>-NNNN"; since Phase 11 a TK- id is also
+        legal, so the error has to describe the rule as it now stands or it
+        tells an author their valid-looking TK- id is malformed. Asserted
+        against the *shape* rather than one literal so a reword stays green.
+        """
         bad = entry(eid="CR-demo-1")
         probs = self.validate_text(HEADER + bad + TRAILER)
-        self.assertTrue(any("CR-<project>-NNNN" in str(p) for p in probs))
+        self.assertTrue(
+            any("-<project>-NNNN" in str(p) for p in probs),
+            [str(p) for p in probs])
+        self.assertTrue(
+            any("CR/TK" in str(p) for p in probs),
+            "the id error should name both accepted prefixes: %s"
+            % [str(p) for p in probs])
 
     def test_bad_severity_and_approved_are_rejected(self):
         probs = self.validate_text(HEADER + entry({"severity": "spicy",
