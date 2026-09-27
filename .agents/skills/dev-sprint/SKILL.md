@@ -13,10 +13,14 @@ A workflow for building features through autonomous, resumable, phase-by-phase s
 RECON  →  PLAN  →  [ DEV SPRINT → TEST/DEBUG SPRINT ]×N per phase  →  GATE UPDATE  →  next phase
 ```
 
-Three files drive everything, all in the project dir:
+Three files drive everything, **directly in the project dir root** (`/home/user/projects/<name>/`):
 - **report.md** — one-time recon findings from the initial codebase/context scan
 - **plan.md** — the phase-by-phase plan, each phase broken into actionable tasks plus a final e2e test gate
 - **gatelog.md** — the single source of truth for progress: which phases are done, which is next, and a findings section per phase
+
+**Write all three to the project dir root, not a subdirectory.** "In the project dir" means the directory itself, not a folder inside it. `alexa-hermes` keeps its trio in `expansion_skills/` and that was a deliberate scoping-session choice to keep them together — it works because Step 0 searches recursively, but it is not the default and a new project should not copy it. `dev-dashboard` and `Nanites-harness` both keep the trio at the root, which is the convention to follow.
+
+When creating a **new** project, create the trio at the root. When **resuming** an existing one, use wherever Step 0 actually finds the files — never relocate them, and never create a second copy at the root if the trio already lives in a subdir.
 
 Read `references/file-formats.md` before creating or editing any of the three files — it has the exact templates and field meanings.
 
@@ -167,12 +171,13 @@ If the user wants this run autonomously across repeated scheduled calls (e.g. a 
 
 Check gatelog.md's "Next phase to work on" line. Once it reads "All phases complete," this skill's own implementation work is done. **The audit handoff below is one-shot per completion, not per invocation** — see the guard before you trigger anything.
 
-### The final sync — push everything BEFORE the cron deletes itself
+### The final sync — push everything BEFORE declaring the sprint finished
 
 **A cron that deletes itself while holding unpushed work is a silent data-loss
 bug.** The job is gone, the work is gone, and the next session finds an empty
-phase marked done. This is the single most important ordering rule in this
-skill, and it exists because the self-destruct is *designed* to delete the job.
+phase marked done. The ordering rule survives from the old self-destruct design
+even though the deletion itself no longer happens, because the failure it
+prevents is unchanged: the work exists on exactly one machine.
 
 So when this run is the one that reaches 2 consecutive no-op runs with every
 phase complete, the sequence is strictly ordered:
@@ -180,16 +185,28 @@ phase complete, the sequence is strictly ordered:
 ```
 final sync:  git add -A → commit → push → PR open/update
    └─ ANY step fails → STOP HERE. Do not write the marker. Do not provision
-      the audit. Do NOT delete the cron. Report the failure and leave the job
+      the audit. Do not signal finished. Report the failure and leave the job
       alive so the next run retries.
 marker:      write the generation-fingerprint marker
 provision:   create the audit cron
-destroy:     delete this cron          ← last, and only if everything above worked
+finish:      set state: finished, then exit      ← last, and only if all above worked
 ```
 
+**This session never deletes a cron.** That is not a stylistic preference; it is
+the rule that keeps a shared loop alive. This skill used to end by removing the
+job it was running, which was safe only while every project had its own private
+cron. Under one shared dev-sprint loop, "its own cron" *is* the loop — a session
+that removed it would take down every queued project, including the ones that had
+not started yet. Deletion of a loop belongs to the dashboard, and even the
+dashboard never deletes the loop, only individual tasks.
+
+The old step is described rather than quoted on purpose. A destructive command
+sitting in a skill file, even inside backticks and even labelled as historical,
+is one copy-paste away from being run by a future session that skims it.
+
 A failed push means the work exists on exactly one machine. Keeping a cron alive
-to retry costs one scheduled no-op run. Deleting it costs the sprint. That is
-not a close call, so the rule is unconditional — do not "delete it now and push
+to retry costs one scheduled no-op run. Ending the sprint costs the work. That is
+not a close call, so the rule is unconditional — do not "finish it now and push
 later", there is no later.
 
 Read `references/git-and-pr.md` for the commands and the full ordering. If this
