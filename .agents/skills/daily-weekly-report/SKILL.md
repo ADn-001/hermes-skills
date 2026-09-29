@@ -22,10 +22,27 @@ of once per question.
 
 ## Where things live
 
-- `/home/user/reports/daily/YYYY-MM-DD.md` — the raw daily log, one file per day.
-- `/home/user/reports/daily-report.md` — the **current daily report**, rewritten in place
+Two paths, resolved once at the top of a session:
+
+- **`$REPORTS`** — the reports directory. In the author's deployment it is
+  `~/reports`; elsewhere, find it with `find ~ -name daily-report.md`.
+- **`$CORE`** — the bridge's `relay_core.py`, which owns the report writer.
+  Found with `find ~ -name relay_core.py`. See "Writing the files" below.
+
+Then, relative to `$REPORTS`:
+
+- `daily/YYYY-MM-DD.md` — the raw daily log, one file per day.
+- `daily-report.md` — the **current daily report**, rewritten in place
   each time the daily report job runs.
-- `/home/user/reports/weekly-report.md` — the **current weekly report**, same deal.
+- `weekly-report.md` — the **current weekly report**, same deal.
+
+**Why variables rather than literals.** A tracked skill carrying somebody's
+absolute home path is a personal path in a shared repository, and it is wrong on
+every machine but one. It also fails silently: the command does not error
+for a path that does not exist yet, it writes somewhere nobody reads. This file
+had seven of them, and the drift that put a *new* literal in it is the same
+failure wearing a different hat — the installed copy and this one disagreed
+precisely because they were copied by hand instead of from one source.
 - Rolling window of the **most recent 7 log files that exist**, not a calendar-week — if a
   day had no activity, there's no file for it, and that's fine; don't create empty files
   just to keep a fixed 7-day span. When any skill writes a new day's file, prune anything
@@ -102,16 +119,40 @@ Check the clock (`date`) right before appending if the run has been long, and ve
 entry actually landed — the bridge's own `log_daily` writes to the current day too, so an entry
 can end up in a different file than the rest of the run's entries if you guess the timestamp.
 
+## Writing the files (prefer the bridge's writer)
+
+Prefer the bridge's own writer over a bare `write_file`. It does three things
+a hand-written file gets wrong, and each of them is silent:
+
+- **it stamps the covered date**, from the run's own clock rather than yours;
+- **it sets 0600** — these reports name the user's projects by name;
+- **it writes atomically** (`os.replace`), so a run interrupted mid-write
+  cannot leave a half-written report that looks complete.
+
+```bash
+python3 "$CORE" report write today -     # body on stdin
+python3 "$CORE" report write weekly -
+```
+
+Resolve `$CORE` the way `idea-record` describes: the bridge's `relay_core.py`,
+found with `find ~ -name relay_core.py`.
+
+**Feed it the BODY ONLY, starting at the first `## ` heading.** The writer emits
+the `# Daily report — <date>` title itself, and it strips a leading title from
+the body rather than emitting it twice — so a body that includes one ends up
+with the same heading twice. Only when this command is unavailable do you write
+the report file directly, title included.
+
 ## The two report jobs (who writes the report files)
 
 Two cron jobs own the report files. They are the only things that write them.
 
 **Daily job** — runs shortly after the day it reports on is over (e.g. `10 0 * * *`, or
 late evening before midnight if the user wants same-day). It reads the day's log file and
-**overwrites** `/home/user/reports/daily-report.md`.
+**overwrites** `$REPORTS/daily-report.md`.
 
 **Weekly job** — runs once a week (e.g. Monday morning). It reads the most recent 7 log
-files and **overwrites** `/home/user/reports/weekly-report.md`.
+files and **overwrites** `$REPORTS/weekly-report.md`.
 
 Each report file is self-describing — it states the window it covers, so a reader never has
 to guess whether they are looking at today or last Tuesday:
@@ -143,7 +184,7 @@ not stop the daily one.
 
 On request ("what happened today," "give me the daily report"):
 
-1. **Read `/home/user/reports/daily-report.md`.** That is the whole point of pre-writing it.
+1. **Read `$REPORTS/daily-report.md`.** That is the whole point of pre-writing it.
 2. If that file doesn't exist or is stale (its stated date is older than the most recent
    log file), say so plainly, then fall back: read the newest log file, say which date it is
    from — never imply an older day is today — and summarise that.
@@ -157,7 +198,7 @@ On request ("what happened today," "give me the daily report"):
 
 On request ("weekly report," "what happened this week"):
 
-1. **Read `/home/user/reports/weekly-report.md`.** Same deterministic path as daily.
+1. **Read `$REPORTS/weekly-report.md`.** Same deterministic path as daily.
 2. If it's missing or predates the newest log file, fall back to reading the up-to-7 most
    recent log files and rolling them up yourself, and say that you did.
 3. Same delivery rules: the file is the answer; adapt for the channel, don't re-infer.
