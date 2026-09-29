@@ -1,6 +1,6 @@
 ---
 name: codebase-audit
-description: "Codebase audit / codereview — a read-only whole-codebase review that records findings as entries in a persistent, idempotent ledger (stable IDs, survives re-runs) under /home/user/codereview/PROJECT_NAME/ledger.md. Use whenever the user asks for a \"codereview,\" \"code audit,\" \"codebase audit,\" or \"full review.\" Distinct from requesting-code-review, which reviews one diff/PR. Also triggers automatically at the end of a dev-sprint run once all phases are complete. Never edits code."
+description: "Codebase audit / codereview — a read-only whole-codebase review that records findings as entries in a persistent, idempotent ledger (stable IDs, survives re-runs), one ledger per project under a shared codereview root. Use whenever the user asks for a \"codereview,\" \"code audit,\" \"codebase audit,\" or \"full review.\" Distinct from requesting-code-review, which reviews one diff/PR. Also triggers automatically at the end of a dev-sprint run once all phases are complete. Never edits code."
 ---
 
 # Codebase Audit
@@ -9,8 +9,23 @@ A read-only, whole-codebase review that produces a persistent, append-and-merge 
 
 ## Where things live
 
-- All ledgers live under one shared root: `/home/user/codereview/<project-name>/ledger.md` — one ledger per project, named to match the project dir under `/home/user/projects/`.
-- **Resolve `<project-name>` from the dashboard ledger, not by guessing.** The authoritative location of each project is the `"path"` field in `/home/user/projects/dev-dashboard/state.json`. Read it with the library (`state.load(...)`), never by hand. Do not assume a project sits directly under `/home/user/` — that was the pre-2026-09-26 layout, and the audit root is the one directory that did **not** move. Note that project names are real directory names and may contain uppercase (e.g. `Nanites-harness`); the ledger name must match the project name exactly, and the codereview subdirectory is the same name.
+Three paths, resolved once at the top of a session. They are variables rather
+than literals because this repository is shared: an absolute path written into
+a skill resolves on exactly one machine, and fails *silently* — a command
+pointed at a directory that does not exist does not raise, it writes a ledger
+nobody reads.
+
+- **`$CODE_REVIEW`** — the shared findings root, holding one
+  `<project-name>/ledger.md` per project. A **sibling** of `$PROJECTS`, not
+  inside it. Find it with `find ~ -maxdepth 3 -name 'ledger.md' -path '*codereview*'`.
+- **`$PROJECTS`** — the directory that *contains* project checkouts. Find it
+  with `find ~ -maxdepth 3 -type d -name dev-dashboard`.
+- **`$DASHBOARD`** — the dev-dashboard checkout, needed to read its ledger.
+
+So a ledger is `$CODE_REVIEW/<project-name>/ledger.md`, and `<project-name>` is
+the same string as the checkout directory under `$PROJECTS`.
+
+- **Resolve `<project-name>` from the dashboard ledger, not by guessing.** The authoritative location of each project is the `"path"` field in `$DASHBOARD/state.json`. Read it with the library (`state.load(...)`), never by hand. Note that project names are real directory names and may contain uppercase (e.g. `Nanites-harness`); the ledger name must match the project name exactly, and the codereview subdirectory is the same name. Do not assume a project sits directly under the home directory — that was an older layout, and the audit root is the one directory that did **not** move with it.
 - Read `references/ledger-schema.md` before creating or updating a ledger — it has the exact per-entry field schema and merge rules. Don't freewheel the schema; do freewheel the `category`/`severity` labels you assign within it.
 
 ## When to run
@@ -33,8 +48,8 @@ A read-only, whole-codebase review that produces a persistent, append-and-merge 
    `audit.enabled` is false, that is the user's decision — do not audit it
    anyway. If it is enabled but nothing has run yet, that means nothing is due,
    not that this run should arrange a schedule (see "Scheduling" below).
-1. Resolve the target project dir the same way `dev-sprint` does (given path, or a local dir matching the name/subject). Project directories are under `/home/user/projects/<name>/`.
-2. Check `/home/user/codereview/<project-name>/ledger.md`. If it exists, read it in full — every existing entry, its `status`, and its `approved` flag. This run is a **merge**, not a fresh write.
+1. Resolve the target project dir the same way `dev-sprint` does (given path, or a local dir matching the name/subject). Project directories are under `$PROJECTS/<name>/`.
+2. Check `$CODE_REVIEW/<project-name>/ledger.md`. If it exists, read it in full — every existing entry, its `status`, and its `approved` flag. This run is a **merge**, not a fresh write.
 3. If it doesn't exist, this is the first audit for this project — you'll create it fresh (still following the same schema).
 
 **Prefer the parser over your own eyes.** These ledgers are hand-formatted YAML in
@@ -42,9 +57,9 @@ markdown and they drift — the first real ledger here had a field the schema di
 define, on all 53 entries. When this repo's `tools/` is available:
 
 ```bash
-python3 tools/ledger.py validate /home/user/codereview/<project>/ledger.md
-python3 tools/ledger.py stats    /home/user/codereview/<project>/ledger.md
-python3 tools/ledger.py list     /home/user/codereview/<project>/ledger.md
+python3 tools/ledger.py validate $CODE_REVIEW/<project>/ledger.md
+python3 tools/ledger.py stats    $CODE_REVIEW/<project>/ledger.md
+python3 tools/ledger.py list     $CODE_REVIEW/<project>/ledger.md
 ```
 
 `validate` checks field presence, id shape and uniqueness, legal status values, severity

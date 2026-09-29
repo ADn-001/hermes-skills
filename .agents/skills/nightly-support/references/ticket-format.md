@@ -1,6 +1,6 @@
 # Ticket format
 
-Written to `/home/user/codereview/<project-name>/tickets/<ticket-id>.md`. `<ticket-id>` format: `TICKET-<date>-<short-slug>` (e.g. `TICKET-2026-09-22-auth-webhook-hardening`).
+Written to `$CODE_REVIEW/<project-name>/tickets/<ticket-id>.md`. `<ticket-id>` format: `TICKET-<date>-<short-slug>` (e.g. `TICKET-2026-09-22-auth-webhook-hardening`).
 
 A ticket is a cover summary plus the bundled ledger entries it groups — dev-sprint's "Starting fresh" step reads this whole file as its input spec.
 

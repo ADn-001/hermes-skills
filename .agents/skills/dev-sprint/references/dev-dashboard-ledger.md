@@ -28,9 +28,13 @@ Path resolution, in order: the server's `--state` flag, then `$DASHBOARD_STATE`,
 then the project's own `state.json`. Read it with the library, not by hand:
 
 ```python
-import sys; sys.path.insert(0, "/home/user/projects/dev-dashboard")
+import os, sys
+# $DASHBOARD is this machine's dev-dashboard checkout. An absolute path
+# here would make the snippet work on exactly one machine, silently, in
+# a repository other people read.
+sys.path.insert(0, os.environ["DASHBOARD_ROOT"])
 from lib import state
-doc = state.load("/home/user/projects/dev-dashboard/state.json")
+doc = state.load(os.path.join(os.environ["DASHBOARD_ROOT"], "state.json"))
 ```
 
 `load()` validates and returns a normalised document, or raises `StateError`
@@ -53,7 +57,7 @@ python3 ~/projects/dev-dashboard/tools/validate_state.py validate --state <path>
   "updated_at": "2026-09-26T00:00:00Z",
   "projects": {
     "<project>": {
-      "path": "/home/user/projects/<project>",
+      "path": "$PROJECTS/<project>",
       "path_absent": false,
       "audit":   { "enabled": true, "cron": "codebase-audit-<p>-auto-00000000",
                    "interval": "every 4 days" },
@@ -106,7 +110,11 @@ facts, not one.
 Use the library — it is already tested, and its edge cases are subtle:
 
 ```python
-import sys; sys.path.insert(0, "/home/user/projects/dev-dashboard")
+import os, sys
+# $DASHBOARD is this machine's dev-dashboard checkout. An absolute path
+# here would make the snippet work on exactly one machine, silently, in
+# a repository other people read.
+sys.path.insert(0, os.environ["DASHBOARD_ROOT"])
 from lib import ownership
 
 mine = ownership.owned_jobs(all_jobs)              # filter to ours
@@ -142,7 +150,7 @@ This is the tool surface the skills need. `hermes cron` is the CLI; see
 # 2. Create the job.
 hermes cron create "every 3 hours" "<the prompt>" \
     --name "dev-sprint-<project>-auto-<uid>" \
-    --workdir "/home/user/projects/<project>" \
+    --workdir "$PROJECTS/<project>" \
     --skill dev-sprint \
     --skill test-driven-development \
     --skill systematic-debugging \

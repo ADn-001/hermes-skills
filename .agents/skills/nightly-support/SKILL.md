@@ -26,9 +26,26 @@ codebase-audit ledger (approved:true, status:new)
    mark ledger entries: status=assigned → ticketed, linked_ticket set
 ```
 
+## Where things live
+
+Two paths, resolved once at the top of a session. They are variables rather
+than literals because this repository is shared: an absolute path in a skill
+resolves on exactly one machine and fails *silently* — a command pointed at a
+directory that does not exist does not raise, it reads nothing and reports
+nothing found.
+
+- **`$CODE_REVIEW`** — the shared findings root holding one
+  `<project-name>/ledger.md` per project, plus `scope.json`. A **sibling** of
+  `$PROJECTS`, not inside it. Find it with
+  `find ~ -maxdepth 3 -name 'ledger.md' -path '*codereview*'`.
+- **`$PROJECTS`** — the directory that *contains* project checkouts. Find it
+  with `find ~ -maxdepth 3 -type d -name dev-dashboard`.
+
+`codebase-audit` defines the same two variables the same way.
+
 ## Scope: this skill is deliberately narrow
 
-**This skill does not scan every ledger under `/home/user/codereview/`.** It works on a
+**This skill does not scan every ledger under `$CODE_REVIEW/`.** It works on a
 scope of **one to three projects**, set by the user (or by a scoping `nightly-support`
 trigger) and persisted so unattended runs are deterministic.
 
@@ -40,7 +57,7 @@ provision a burst of concurrent sprints on a machine that can only carry one.
 
 ### Where the scope lives
 
-`/home/user/codereview/scope.json`, created on first use:
+`$CODE_REVIEW/scope.json`, created on first use:
 
 ```json
 {
@@ -50,7 +67,7 @@ provision a burst of concurrent sprints on a machine that can only carry one.
 ```
 
 - **`projects`** — up to `max_projects` (default 3) directory names under
-  `/home/user/codereview/`, i.e. ledger paths `/home/user/codereview/<name>/ledger.md`.
+  `$CODE_REVIEW/`, i.e. ledger paths `$CODE_REVIEW/<name>/ledger.md`.
 - **`max_projects`** — hard cap. A fourth project is refused, not silently queued. Raise
   the cap deliberately if the user wants more.
 
@@ -74,8 +91,8 @@ Use the `tools/ledger.py` helper from this skill's repo when it is available —
 the ledger and answers exactly this question without an LLM re-reading the file:
 
 ```bash
-python3 tools/ledger.py find /home/user/codereview/<project>/ledger.md --approved --status new
-python3 tools/ledger.py validate /home/user/codereview/<project>/ledger.md
+python3 tools/ledger.py find $CODE_REVIEW/<project>/ledger.md --approved --status new
+python3 tools/ledger.py validate $CODE_REVIEW/<project>/ledger.md
 ```
 
 Filter to entries where `approved: true` **and** `status: new`. Anything else
@@ -101,7 +118,7 @@ and permanent.
 So before skipping a project on rule 1, **check how long it has been claimed**:
 
 ```bash
-python3 tools/ledger.py stale-assigned /home/user/codereview/<project>/ledger.md --older-than-hours 26
+python3 tools/ledger.py stale-assigned $CODE_REVIEW/<project>/ledger.md --older-than-hours 26
 ```
 
 An `assigned` entry older than that with no `linked_ticket` is not in-flight work; it is
@@ -125,7 +142,7 @@ One project may yield several tickets, but see Step 4's rule: a project gets
 disk and link them, but let a single task pick them up sequentially — two sprints on the
 same codebase in parallel is how two agents end up editing the same file.
 
-Write the ticket using **the same schema as a ledger entry** (see `codebase-audit`'s `references/ledger-schema.md`) — this is what lets `dev-sprint`'s "Starting fresh" step consume it directly as its input spec without a translation step. A grouped ticket is effectively a small collection of ledger entries bundled with a short cover summary explaining how they relate; write it as a `references/ticket-format.md`-shaped doc (see that reference for the exact shape) at `/home/user/codereview/<project-name>/tickets/<ticket-id>.md`.
+Write the ticket using **the same schema as a ledger entry** (see `codebase-audit`'s `references/ledger-schema.md`) — this is what lets `dev-sprint`'s "Starting fresh" step consume it directly as its input spec without a translation step. A grouped ticket is effectively a small collection of ledger entries bundled with a short cover summary explaining how they relate; write it as a `references/ticket-format.md`-shaped doc (see that reference for the exact shape) at `$CODE_REVIEW/<project-name>/tickets/<ticket-id>.md`.
 
 ## Step 4: Enqueue the dev-sprint task — one per project, no cron
 
@@ -158,7 +175,7 @@ Also skip if the project is absent from the ledger, `path_absent` is true, or
 sprint scope is not enabled. Those are the user's decisions.
 
 Once the ticket is written:
-- Resolve the target project dir the same way `dev-sprint` does. Project directories are under `/home/user/projects/<name>/`.
+- Resolve the target project dir the same way `dev-sprint` does. Project directories are under `$PROJECTS/<name>/`.
 - **Enqueue the work as a task in the dashboard ledger, then return.** This skill does not create, arm, schedule, stagger or name a cron job. It never did that safely under a shared loop, and it does not do it now.
 
 #### How to enqueue
@@ -167,7 +184,12 @@ Once the ticket is written:
 `state.save()` is that path. Load, append one task, save:
 
 ```python
-import sys; sys.path.insert(0, "/home/user/projects/dev-dashboard")
+import os, sys
+# $DASHBOARD is this machine's dev-dashboard checkout, so `from lib import
+# state` finds the dashboard's own library rather than anything else on the
+# path. An absolute path here would make this snippet work on exactly one
+# machine, silently, in a repository other people read.
+sys.path.insert(0, os.environ["DASHBOARD_ROOT"])
 from lib import state
 
 path = state.state_path()
@@ -249,7 +271,7 @@ Use the surgical rewriter rather than a text edit, so approvals and every other 
 survive untouched:
 
 ```bash
-python3 tools/ledger.py set-status /home/user/codereview/<project>/ledger.md \
+python3 tools/ledger.py set-status $CODE_REVIEW/<project>/ledger.md \
     --id CR-<project>-0007 --status ticketed \
     --ticket TICKET-2026-09-25-auth-webhook-hardening
 ```

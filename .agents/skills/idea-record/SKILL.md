@@ -210,7 +210,12 @@ scheduled job nobody remembers creating.
 append one task, save:
 
 ```python
-import sys; sys.path.insert(0, "/home/user/projects/dev-dashboard")
+import os, sys
+# $DASHBOARD is this machine's dev-dashboard checkout, so `from lib import
+# state` finds the dashboard's own library rather than anything else on the
+# path. An absolute path here would make this snippet work on exactly one
+# machine, silently, in a repository other people read.
+sys.path.insert(0, os.environ["DASHBOARD_ROOT"])
 from lib import state
 
 path = state.state_path()

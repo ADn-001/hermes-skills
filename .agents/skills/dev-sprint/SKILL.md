@@ -13,7 +13,7 @@ A workflow for building features through autonomous, resumable, phase-by-phase s
 RECON  →  PLAN  →  [ DEV SPRINT → TEST/DEBUG SPRINT ]×N per phase  →  GATE UPDATE  →  next phase
 ```
 
-Three files drive everything, **directly in the project dir root** (`/home/user/projects/<name>/`):
+Three files drive everything, **directly in the project dir root** (`$PROJECTS/<name>/` — see Step 0 for how to resolve `$PROJECTS`):
 - **report.md** — one-time recon findings from the initial codebase/context scan
 - **plan.md** — the phase-by-phase plan, each phase broken into actionable tasks plus a final e2e test gate
 - **gatelog.md** — the single source of truth for progress: which phases are done, which is next, and a findings section per phase
@@ -24,12 +24,21 @@ When creating a **new** project, create the trio at the root. When **resuming** 
 
 Read `references/file-formats.md` before creating or editing any of the three files — it has the exact templates and field meanings.
 
+A second path appears in the completion-audit guard below:
+**`$CODE_REVIEW`** is the shared findings root holding one
+`<project-name>/ledger.md` per project, a **sibling** of `$PROJECTS`
+rather than inside it. `codebase-audit` defines it the same way.
+
 ## Step 0: Resolve the target project dir (idempotency check — always do this first)
 
-0. **Where projects live.** Project directories are under `/home/user/projects/<name>/`.
+0. **Where projects live.** **`$PROJECTS` is the directory that *contains*
+   project checkouts**; project directories are `$PROJECTS/<name>/`. It is a
+   variable, not a literal, because this repository is shared: an absolute
+   path in a skill resolves on exactly one machine. Find it with
+   `find ~ -maxdepth 3 -type d -name dev-dashboard`.
    Look there first when resolving a name to a path. If the name matches a
-   directory directly under `/home/user` (an older layout) *and* one under
-   `/home/user/projects`, they are the same project moved — use the `projects/`
+   directory directly under the home directory (an older layout) *and* one
+   under `$PROJECTS`, they are the same project moved — use the `$PROJECTS`
    one and note the relocation in the gatelog. Do not start a second sprint on
    what is the same checkout.
 1. **If the user gave a path**, use it.
@@ -266,7 +275,7 @@ holds, do NOT audit again:
 
 1. The gatelog's `## Notes` records a completion audit (date + what it found). A prior
    agent may have written this by hand precisely because the skill had no guard — honour it.
-2. `/home/user/codereview/<project-name>/ledger.md` exists **and** its `Last run:` date is on
+2. `$CODE_REVIEW/<project-name>/ledger.md` exists **and** its `Last run:` date is on
    or after the date the gatelog reached "All phases complete." The ledger is the audit's
    own output: if it exists and postdates completion, the audit has already run.
 3. The ledger exists and every entry is `status: resolved` — nothing left to find.

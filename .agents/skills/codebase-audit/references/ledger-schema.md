@@ -1,6 +1,7 @@
 # Ledger schema
 
-One ledger per project: `/home/user/codereview/<project-name>/ledger.md`. Hybrid format — a short human-readable header, then one entry per finding as a fenced YAML block. Markdown around each block is fine (a one-line prose summary above the block is encouraged), but the block itself must be parseable as-is: field names and value shapes below are fixed, not freewheeled. `category` and `severity` *values* are freewheeled by the reviewing agent — pick whatever label fits — but the *field itself* must be present.
+One ledger per project: `$CODE_REVIEW/<project-name>/ledger.md` (see the
+skill's "Where things live" for how `$CODE_REVIEW` resolves). Hybrid format — a short human-readable header, then one entry per finding as a fenced YAML block. Markdown around each block is fine (a one-line prose summary above the block is encouraged), but the block itself must be parseable as-is: field names and value shapes below are fixed, not freewheeled. `category` and `severity` *values* are freewheeled by the reviewing agent — pick whatever label fits — but the *field itself* must be present.
 
 ## File header
 
@@ -8,7 +9,7 @@ One ledger per project: `/home/user/codereview/<project-name>/ledger.md`. Hybrid
 # Codebase Audit Ledger — <project-name>
 
 Last run: <date of most recent audit>
-Location: /home/user/codereview/<project-name>/ledger.md
+Location: $CODE_REVIEW/<project-name>/ledger.md
 
 ## Findings
 ```
@@ -71,8 +72,8 @@ and they drift. When this skill's `tools/ledger.py` is available, run it — it 
 presence, id shape and uniqueness, legal status values, the date ordering, and severity:
 
 ```bash
-python3 tools/ledger.py validate /home/user/codereview/<project>/ledger.md
-python3 tools/ledger.py stats    /home/user/codereview/<project>/ledger.md
+python3 tools/ledger.py validate $CODE_REVIEW/<project>/ledger.md
+python3 tools/ledger.py stats    $CODE_REVIEW/<project>/ledger.md
 ```
 
 `ledger.py next-id` computes the next unused id and `stale-assigned` finds entries a
@@ -126,7 +127,7 @@ is a lock with a timeout, not a queue position.
 # Codebase Audit Ledger — billing-service
 
 Last run: 2026-09-22
-Location: /home/user/codereview/billing-service/ledger.md
+Location: $CODE_REVIEW/billing-service/ledger.md
 
 ## Findings
 
@@ -175,7 +176,7 @@ status: ticketed
 first_seen: 2026-08-30
 last_seen: 2026-09-22
 linked_ticket: TICKET-2026-09-15-startup-cleanup
-linked_cron_job: /home/user/billing-service-cleanup
+linked_cron_job: billing-service-cleanup
 overlaps_active_phase: null
 ```
 ```
