@@ -44,6 +44,27 @@ CANONICAL = os.path.join(REPO_ROOT, ".agents", "skills")
 INSTALLED_ROOT = os.environ.get("HERMES_SKILLS_INSTALLED",
                                 os.path.expanduser("~/.hermes/skills"))
 
+#: **A second mirror location, added after the guard proved insufficient.**
+#:
+#: The first version of this file knew about `~/.hermes/skills` only, and
+#: reported the tree clean — while `alexa-hermes/expansion_skills/skills-source`
+#: went stale after a canonical edit. Nothing here noticed; two *dev-dashboard*
+#: tests did, because they watch both locations, and that is how it was found.
+#:
+#: One copy of a skill is a convention. Two is a second thing to forget, and the
+#: failure is the same silent divergence either way. So the roots are a list,
+#: each one optional, and every mirror check runs over all of them.
+EXTRA_ROOTS = [
+    os.path.expanduser("~/projects/alexa-hermes/expansion_skills/skills-source"),
+]
+
+#: Deliberately *not* mirrored there; asserted absent by a dev-dashboard test.
+NOT_MIRRORED = ("idea-record",)
+
+
+def installed_roots():
+    return [r for r in [INSTALLED_ROOT] + EXTRA_ROOTS if os.path.isdir(r)]
+
 
 def skill_dirs(root):
     if not os.path.isdir(root):
@@ -72,18 +93,46 @@ def tracked_markdown():
     return found
 
 
+def tracked_markdown_in(root):
+    """Every markdown file under one skill root: relative path -> **path**.
+
+    Paths, not contents. The first version returned the file *text*, and the
+    byte-equality test then did ``open(value)`` on a paragraph -- which fails
+    with `OSError: Filename too long` rather than anything resembling a real
+    diagnosis. Two different things sharing one variable is the whole hazard.
+    """
+    found = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in sorted(filenames):
+            if name.endswith(".md"):
+                path = os.path.join(dirpath, name)
+                found[os.path.relpath(path, root)] = path
+    return found
+
+
+def read(path):
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
 def installed_mirror(name):
-    """Find ``name``'s mirror anywhere under the installed root.
+    """Find ``name``'s mirrors under *every* installed root.
 
     Category is not part of the name — the same skill can be installed under
     `software-development/`, `productivity/` or anywhere else — so this walks
-    the tree rather than guessing a layout. A skill with two installed copies
-    is itself a drift, and :class:`TestOneInstalledCopyPerSkill` catches it.
+    the trees rather than guessing a layout. Searching only the first root is
+    how the expansion copy went unnoticed for a whole phase.
+
+    A skill with two copies **in the same root** is itself a drift, and
+    :class:`TestOneInstalledCopyPerSkill` catches that; copies in *different*
+    roots are expected and fine.
     """
     found = []
-    for dirpath, dirnames, filenames in os.walk(INSTALLED_ROOT):
-        if os.path.basename(dirpath) == name and "SKILL.md" in filenames:
-            found.append(os.path.join(dirpath, "SKILL.md"))
+    for root in installed_roots():
+        for dirpath, dirnames, filenames in os.walk(root):
+            if os.path.basename(dirpath) == name and "SKILL.md" in filenames:
+                found.append(os.path.join(dirpath, "SKILL.md"))
     return found
 
 
@@ -238,24 +287,40 @@ class TestCanonicalAndInstalledAgree(unittest.TestCase):
     """
 
     def setUp(self):
-        if not os.path.isdir(INSTALLED_ROOT):
-            self.skipTest("no installed skills at %s" % INSTALLED_ROOT)
+        if not installed_roots():
+            self.skipTest("no installed skill roots to compare against")
         if not skill_dirs(CANONICAL):
             self.skipTest("no canonical skills at %s" % CANONICAL)
 
     def test_every_mirror_is_byte_identical_to_canonical(self):
+        """Every markdown file, in every root -- not just `SKILL.md`.
+
+        The first version of this test opened `SKILL.md` on each side and
+        compared those two files. It passed while **every `references/` file in
+        every root was free to drift**, which is the same blind spot as the path
+        test had: `references/` is loaded *in addition to* the skill, so it is
+        the likelier place for a divergence to hide and the more expensive when
+        it does. Found by mutating one `references/ledger-schema.md` in the
+        expansion copy and watching the test stay green.
+        """
         offenders = []
         for skill in skill_dirs(CANONICAL):
             name = os.path.basename(skill)
-            canon_path = os.path.join(skill, "SKILL.md")
-            with open(canon_path, encoding="utf-8") as fh:
-                canon = fh.read()
-            for mirror in installed_mirror(name):
-                with open(mirror, encoding="utf-8") as fh:
-                    if fh.read() != canon:
-                        offenders.append(
-                            "%s\n        canonical: %s\n        installed:  %s"
-                            % (name, canon_path, mirror))
+            canonical = tracked_markdown_in(skill)
+            for mirror_path in installed_mirror(name):
+                mirror_root = os.path.dirname(mirror_path)
+                mirrored = tracked_markdown_in(mirror_root)
+                for rel, canon_path in sorted(canonical.items()):
+                    other = mirrored.get(rel)
+                    if other is None:
+                        # Missing entirely; that is the other test's job, and
+                        # saying so here keeps the message honest.
+                        continue
+                    if read(other) != read(canon_path):
+                            offenders.append(
+                                "%s/%s\n        canonical: %s\n        installed:  %s"
+                                % (name, rel,
+                                   os.path.join(skill, rel), other))
         self.assertEqual(
             offenders, [],
             "an installed skill differs from its canonical copy; sync the "
@@ -272,21 +337,22 @@ class TestCanonicalAndInstalledAgree(unittest.TestCase):
         offenders = []
         for skill in skill_dirs(CANONICAL):
             name = os.path.basename(skill)
-            canon_path = os.path.join(skill, "SKILL.md")
-            with open(canon_path, encoding="utf-8") as fh:
-                canon = fh.read()
-            canon_heads = {ln.strip() for ln in canon.splitlines()
-                           if ln.startswith("#")}
+            canonical = tracked_markdown_in(skill)
+            canon_heads = set()
+            for canon_path in canonical.values():
+                canon_heads |= {ln.strip() for ln in read(canon_path).splitlines()
+                                if ln.startswith("#")}
             for mirror in installed_mirror(name):
-                with open(mirror, encoding="utf-8") as fh:
-                    text = fh.read()
-                missing = {ln.strip() for ln in text.splitlines()
-                           if ln.startswith("#")} - canon_heads
-                if missing:
-                    offenders.append(
-                        "%s: canonical is missing %s, which the installed copy "
-                        "has:\n        %s"
-                        % (name, sorted(missing), mirror))
+                mirror_root = os.path.dirname(mirror)
+                for rel, other in tracked_markdown_in(mirror_root).items():
+                    missing = {ln.strip()
+                               for ln in read(other).splitlines()
+                               if ln.startswith("#")} - canon_heads
+                    if missing:
+                        offenders.append(
+                            "%s/%s: canonical is missing %s, which the "
+                            "installed copy has:\n        %s"
+                            % (name, rel, sorted(missing), other))
         self.assertEqual(
             offenders, [],
             "the canonical copy is BEHIND an installed one. Do not sync "
@@ -337,26 +403,34 @@ class TestCanonicalAndInstalledAgree(unittest.TestCase):
             "-- syncing canonical -> installed will delete it:\n  "
             + "\n  ".join(offenders))
 
-    def test_one_installed_copy_per_skill(self):
-        """Two installed copies is drift of a different kind.
+    def test_one_installed_copy_per_root(self):
+        """Two copies in the *same* root is drift of a different kind.
 
-        Whichever one a session loads is then a coin toss, so the two can be
-        fixed independently and stay fixed independently. Found here rather
-        than assumed: the installer's category layout is not part of the skill
-        name, so this walks the tree.
+        One copy per root is expected — that is what the extra root is for.
+        Two inside one root is a coin toss on which a session loads, so the two
+        can be fixed independently and stay fixed independently. Found here
+        rather than assumed: the installer's category layout is not part of the
+        skill name, so this walks the trees.
         """
         offenders = []
         for skill in skill_dirs(CANONICAL):
             name = os.path.basename(skill)
-            copies = installed_mirror(name)
-            if len(copies) > 1:
-                offenders.append("%s: %d installed copies\n        %s"
-                                 % (name, len(copies),
-                                    "\n        ".join(copies)))
+            per_root = {}
+            for copy in installed_mirror(name):
+                for root in installed_roots():
+                    if copy.startswith(root + os.sep):
+                        per_root.setdefault(root, []).append(copy)
+                        break
+            for root, copies in per_root.items():
+                if len(copies) > 1:
+                    offenders.append(
+                        "%s: %d copies under %s\n        %s"
+                        % (name, len(copies), root,
+                           "\n        ".join(copies)))
         self.assertEqual(
             offenders, [],
-            "a skill is installed in more than one category, so which copy a "
-            "session loads is undefined:\n  " + "\n  ".join(offenders))
+            "a skill is installed in more than one category within a root, so "
+            "which copy a session loads is undefined:\n  " + "\n  ".join(offenders))
 
 
 if __name__ == "__main__":  # pragma: no cover
