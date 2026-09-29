@@ -172,16 +172,34 @@ from lib import state
 
 path = state.state_path()
 doc = state.load(path)
-doc.setdefault("tasks", {})["dev-sprint-%03d" % _next_index(doc)] = {
+
+# The queue is a LIST under the key "queue" -- not a dict called "tasks".
+# `queue` is the one true queue: state.py validates it, the dashboard renders
+# it, and elevation.task_id is checked against it. An earlier version of this
+# snippet wrote doc["tasks"], which no reader in the project consults, so
+# every enqueue it produced was silently invisible.
+queue = doc.get("queue")
+if not isinstance(queue, list):
+    raise SystemExit("state.json has no usable 'queue' list -- refusing to "
+                     "guess; read views._queue / server._queue first")
+task = {
+    "id": _next_task_id(queue),          # e.g. "dev-sprint-004"
     "kind": "dev-sprint",
     "project": "<project>",
-    "title": "<the ticket title>",
+    "title": "the ticket title",
     "origin_id": "TICKET-2026-09-25-auth-webhook-hardening",
     "source": "nightly-support",
-    "state": "idle",
+    "state": "queued",                  # NOT "idle": only "queued" is runnable
     "enqueued_at": _now_iso(),
 }
-state.save(path, doc)   # normalise → validate → temp file → os.replace
+# Refuse a collision rather than overwriting: two runs minting the same id
+# would silently replace each other's work.
+if any(isinstance(t, dict) and t.get("id") == task["id"] for t in queue):
+    raise SystemExit("task id %s already exists; recompute" % task["id"])
+doc["queue"] = queue + [task]
+state.save(path, doc)   # normalise -> validate -> temp file -> os.replace
+```
+
 ```
 
 Read `dev-sprint`'s `references/dev-dashboard-ledger.md` for the exact task

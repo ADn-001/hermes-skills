@@ -17,19 +17,22 @@ A read-only, whole-codebase review that produces a persistent, append-and-merge 
 
 - User explicitly asks for a codebase audit / codereview of a project.
 - Automatically, one-shot, when a `dev-sprint` run's gatelog reaches "All phases complete" (see dev-sprint's "When all phases are complete" step) — this closes the loop for ticket-originated work by letting the corresponding ledger entries move toward `resolved` on the next `nightly-support` pass.
-- On a recurring cron cadence the user set up for a project (see "Cron / recurring usage" below).
+- On a queued task: the project's audit toggle is on in the dev-dashboard
+  ledger and the interval is due, so the dashboard enqueued one and the manager
+  started a session for it (see "Scheduling" below). You do not arrange the
+  trigger; the dashboard does.
 
 ## Step 1: Identify the project and load prior state
 
 0. **Check the dev-dashboard ledger first.** Read
    `dev-sprint/references/dev-dashboard-ledger.md`. It is the control panel the
    user steers the loop from, and this skill is a **reader** of it: it decides
-   which projects get audited, and when it provisions an audit cron it
-   provisions **its own** job, named `<skill>-<project>-auto-<uid>`. The
-   dashboard never creates a cron. If a project is absent from the ledger, or
+   which projects get audited and when one is due. **It also owns every
+   scheduling decision**: it enqueues a task when the interval is due, and it
+   starts this session. If a project is absent from the ledger, or
    `audit.enabled` is false, that is the user's decision — do not audit it
-   anyway. If it is listed and enabled but no job exists yet, this run is the one
-   that provisions it (see "Cron / recurring usage" below).
+   anyway. If it is enabled but nothing has run yet, that means nothing is due,
+   not that this run should arrange a schedule (see "Scheduling" below).
 1. Resolve the target project dir the same way `dev-sprint` does (given path, or a local dir matching the name/subject). Project directories are under `/home/user/projects/<name>/`.
 2. Check `/home/user/codereview/<project-name>/ledger.md`. If it exists, read it in full — every existing entry, its `status`, and its `approved` flag. This run is a **merge**, not a fresh write.
 3. If it doesn't exist, this is the first audit for this project — you'll create it fresh (still following the same schema).
@@ -92,42 +95,36 @@ Exact field-by-field schema, YAML shape, and worked examples are in
 
 Present the ledger's current state (or a diff-style summary of what changed this run: N new, N still-open, N auto-resolved) to the user. The ledger file itself is the source of truth — don't also generate a separate one-off report file per run.
 
-## Cron / recurring usage
+## Scheduling: this skill never provisions anything
 
-A project can have a recurring codebase-audit cron set up two ways:
-- The user explicitly asks for one (typically offered by `dev-sprint` when a project finishes in an interactive session — default interval 10 hours if the user doesn't specify).
-- `nightly-support` triggers a one-shot run to close out resolved ledger entries after a ticket-originated `dev-sprint` finishes.
+**There is no per-project audit cron. There is no audit cron of any kind.** The
+model that used to document one — `<skill>-<project>-auto-<uid>`, an audit job
+per project, provisioned by this skill and recorded in the ledger — was removed
+in Phase 19 and it must not come back.
 
-Each cron call runs Steps 1–5 above exactly as an interactive invocation would — this skill behaves identically whether triggered by a human or a schedule.
+An audit now happens because a **queue task** exists for it, and the task
+exists because the project's audit toggle is on in the dev-dashboard ledger. The
+dashboard's reconciler enqueues when the interval is due; the manager's tick
+starts a session; this skill runs. Every scheduling decision belongs to the
+dashboard, and this skill is a *worker* that happens to be good at audits.
 
-**When you provision, four things are not optional:**
+**So: do not create, edit, pause, resume or delete a cron job.** Not for a
+project, not for a one-shot, not because the user says "set up a recurring
+audit". If the user wants an audit scheduled, the answer is the audit toggle in
+the dashboard — say so, and do the audit now if they want it now.
 
-1. The name is `<skill>-<project>-auto-<uid>` with a real `uuid4().hex[:8]`
-   suffix. The `-auto-` infix is what marks the job as the loop's; without it
-   the ownership check excludes it, so the job you just created would be one
-   the system is forbidden to touch.
-2. The name shape alone is **necessary but not sufficient** — a job is ours only
-   if its `created_by` is `autonomous` as well. A user can name a job like ours
-   by accident, which is why the check is two facts.
-3. Filter to owned jobs before acting on any. Never "the first codebase-audit
-   job" or "the job for this project" — a user-created job can share both the
-   skill and the project name. `ownership.owned_jobs()` does the filtering.
-4. Write the **real** name and the job's `job_id` back into the ledger, replacing
-   the `-auto-00000000` placeholder the dashboard wrote. A job that exists but
-   is not in the ledger is invisible to the next run.
+This is not a style preference. The per-project cron model was the specific
+thing that had to be dismantled: it meant N projects meant N crons racing for
+one machine, and it meant a whole second scheduling system living alongside a
+queue, a claim file and a busy check that already existed. On 2026-09-28 an
+implementer read a table of cron names in the manager, concluded the system
+provisioned one audit cron per project, and wrote it. The table was the fossil;
+this file was the instruction to rebuild it.
 
-```bash
-hermes cron create "every 10 hours" "<the audit prompt>" \
-    --name "codebase-audit-<project>-auto-<uid>" \
-    --workdir "/home/user/projects/<project>" \
-    --skill codebase-audit
-```
-
-Read `dev-sprint/references/dev-dashboard-ledger.md` for the full tool surface.
-
-**Delete by `job_id`, and only after `ownership.assert_solvable()` confirms the
-match is unambiguous and ours.** A self-destructing job deletes only its own
-id — a job that was replaced under it must never be removed by name collision.
+Each run executes Steps 1–5 above exactly as an interactive invocation would —
+this skill behaves identically whether a person asked for it or a queued task
+started it. **The work is the same; only the trigger differs, and the trigger is
+never yours to arrange.**
 
 ## Logging to the daily report
 

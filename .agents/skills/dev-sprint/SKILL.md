@@ -88,6 +88,46 @@ Triggered whenever gatelog.md and plan.md already exist — whether called inter
 4. Proceed to that phase's **Dev Sprint**, below.
 5. **Do exactly one phase per invocation.** Once that phase reaches all-green and the gatelog is updated, stop — do not cascade into the next phase automatically. (This matches the cron-job model in references/cron-prompt.md, where each cron call is one phase.)
 
+## Read the plan before the code, and write the design down
+
+**A config table is not a design.** Before implementing anything that schedules,
+provisions, or drains work, read the plan/spec for what the system is *for* —
+then read the code to see how far it got. The code is evidence of progress, not
+of intent.
+
+The failure this prevents, from a real session: the plan ordered `nightly-support`
+to stop provisioning a recurring dev-sprint cron and instead *write a queue task
+and return*, and the code still carried a reconciler key for it. Reading the
+*code* said "one cron per skill, per project"; reading the *plan* said "never a
+cron". A whole phase was written on the code's answer, and it would have shipped
+a per-project cron that duplicated a queue, a claim file and a busy check
+already in the repo.
+
+(Note the phrasing: the old cadence is *described*, never quoted. A test greps
+this skill tree for the literal interval, and a verbatim quote of the removed
+step trips it — which is the guard working, not a false positive.)
+
+**Rules:**
+
+1. **Fossil entries are not features.** A table row with a comment about
+   "intent" or a placeholder value is often the shape a *rejected* design left
+   behind. Check whether the plan ever asked for it.
+2. **Ask what drains the work, not what schedules it.** A queue implies a
+   producer. If nothing enqueues, or nothing can start, the feature has never
+   run — and it will look configured the whole time.
+3. **Before adding a scheduler, check whether a drainer exists.** A second one
+   is how a system built to prevent collisions starts causing them.
+4. **Write the design down before the phases, then encode its rules as tests.**
+   Prose does not stop a later session from misreading the code. A deliberately
+   failing test naming the phase that fixes the drift does. Prefer an
+   `expectedFailure` tripwire over deleting the assertion.
+5. **Test prompts and config, not just functions.** Two real bugs were
+   hardcoded project names in prompt files while every function was correct.
+   A test asserting "no file in this repo hardcodes project X" is cheap and
+   finds them.
+6. **Re-run the whole suite after a docs change.** A gatelog pointer edit can
+   break a test that reads the gatelog, and the failure looks unrelated.
+
 ## Dev Sprint (implementing one phase)
 
 **0. Git preflight — before writing any code.** Read
@@ -243,8 +283,12 @@ outlive the sprint that produced it.
 
 Don't just stop silently — hand off depending on how this run was started:
 
-- **Finished interactively, in one live session with the user present:** ask them — *"Want a recurring `codebase-audit` cron for this project? What interval?"* Default to every 10 hours if they say yes without giving a number. Use `cronjob` to set it up if they confirm. Tell them the audit is one-shot; a *recurring* audit cron is a separate, deliberate choice they are making.
-- **Handed off mid-way** (user said something like "I'm going away, take over, run every N hours") and the phases finish across later cron calls: no need to ask — trigger the one-shot `codebase-audit` on the project dir directly once the last phase goes green (subject to the guard above), then stop. If the user set up a recurring dev-sprint cron for this project, leave it running (it'll simply have nothing to do until a future phase or ticket adds more to plan.md); note in the log entry (see below) that the project reached "all phases complete" and that the completion audit already ran. **A "nothing to do" invocation must also honour the guard — that is precisely the invocation that would otherwise re-audit.**
+- **Finished interactively, in one live session with the user present:** ask them — *"want audits on this project going forward?"* If they say yes, **flip the audit toggle for this project in the dev-dashboard**; do not create a cron job.
+- **Handed off mid-way** (user said something like "I'm going away, take over, run every N hours") and the phases finish across later cron calls: no need to ask — turn the project's audit toggle on in the dev-dashboard, which is the only supported way to have a recurring audit, then stop. Note in the log entry (see below) that the project reached "all phases complete" and that the completion audit already ran. **A "nothing to do" invocation must also honour the guard — that is precisely the invocation that would otherwise re-audit.**
+
+  **Why a toggle and not a cron.** An earlier version of this skill said "want a recurring `codebase-audit` cron? … use `cronjob`", and referenced leaving "a recurring dev-sprint cron for this project" running. **Both are gone.** Per-project crons were deleted: the dashboard has exactly two permanent jobs, and a project's work is represented by a toggle plus a queue row, never by a job of its own. A cron created here would be invisible to the manager — it could not be paused, its schedule could not be honoured, and it would fire whether or not anything was due. The toggle is the whole mechanism, and it is also what makes the cadence a per-project setting rather than a string in a job name.
+
+  If a project is not registered in the dashboard yet, add it there rather than creating work around the gap.
 - **Autonomous / ticket-driven** (kicked off by `nightly-support`, or a spec handed off with no live back-and-forth): same as the mid-way case — trigger a one-shot `codebase-audit` automatically on completion, no need to ask.
 
 If this project's ledger entries in `codebase-audit`'s ledger were the reason this dev-sprint run exists (i.e. it originated from a `nightly-support` ticket), the triggered `codebase-audit` run closing the loop is what lets `nightly-support` mark those entries `resolved` next time it runs — don't skip this step for ticket-originated work.
