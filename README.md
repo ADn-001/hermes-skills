@@ -343,7 +343,7 @@ WorkingDirectory=%h/projects/dev-dashboard
 Environment=PYTHONUNBUFFERED=1
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/python3 %h/projects/dev-dashboard/server.py \
-  --host 127.0.0.1 --port 8765
+  --bind 127.0.0.1 --port 8765
 Restart=on-failure
 RestartSec=3
 
