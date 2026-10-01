@@ -104,10 +104,82 @@ this run — never re-process it.
 
 For each project with qualifying entries, check **both** of these before proceeding — either one blocking is enough to skip that project this run:
 
-1. **Ledger-level:** does this project already have entries at `status: assigned` or `status: ticketed`? If so, a dev-sprint is already provisioned or about to be — skip; the newly-approved findings wait in the queue until that run finishes (its completion will trigger a follow-up `codebase-audit`, which is when those older entries resolve and the ledger clears for this project again).
+1. **Ledger-level:** does this project already have entries at `status: assigned` or `status: ticketed`? If so, a dev-sprint is already provisioned or about to be — skip; the newly-approved findings wait in the queue until that run finishes.
+
+   **But settle first, or this rule becomes a deadlock.** `ticketed` is not a
+   claim, it is a *record that a phase was written*. It only means work is
+   genuinely in flight while the plan still has an **unstarted phase**. Once
+   every phase that covered those tickets is `done`, the entries are finished
+   work sitting in the ledger forever, and this rule then skips the project
+   permanently.
+
+   That is not hypothetical, and it is self-justifying: the skill's own
+   "Closing the loop" section said the entries reach `resolved` only when the
+   next `codebase-audit` runs — and that audit is triggered by a dev-sprint
+   *completion*, which needs permission to work, which this rule is withholding.
+   A circular dependency, and the project never moves again.
+
+   So before applying this rule, run **Step 2b: settle** and move every entry
+   whose phase is done to `resolved`. Then this rule means what it says.
 2. **Live-session-level:** even if the ledger looks clear, use `session_search`/`delegation`/`a2a` to check whether a `dev-sprint` session is actually running against that project dir right now (covers a human having kicked one off by hand, outside the ledger's knowledge). If so, skip.
 
 Only proceed to Step 3 for projects that pass both checks.
+
+## Step 2b: Settle — move finished work out of the ledger
+
+Run this **every time, for every scoped project**, before deciding what is new.
+It is the step that makes the cycle a cycle.
+
+A finding's lifecycle ends at `resolved`, and **nothing else in this family
+moves it there.** This step does.
+
+For each entry at `status: ticketed`, ask the only question that can be
+answered mechanically: *is the phase that implements it done?*
+
+1. Read the project's gatelog and list its phases and their statuses.
+2. For each `ticketed` entry, take its `linked_ticket` and find the phase that
+   names that ticket. **Every phase you write in Step 4 must name the tickets
+   it covers**, precisely so this question is answerable.
+3. If that phase exists and is `done`, the work is finished:
+
+   ```bash
+   python3 tools/ledger.py set-status $CODE_REVIEW/<project>/ledger.md \
+       --id CR-<project>-0007 --status resolved
+   ```
+
+4. If the phase is **not started**, the work is genuinely in flight — leave it
+   `ticketed` and skip this project via Step 2.
+5. If you cannot find the phase, say so in the report and **leave the entry
+   alone.** Do not resolve on a guess. An entry that outlives its phase is a
+   problem worth seeing; an entry resolved against the wrong phase destroys the
+   link that lets the next run reason about it.
+
+**Why this step exists, stated plainly.** Every guard in this system points one
+way: toward not starting work. `finished` suppresses provisioning, a complete
+plan suppresses enqueueing, backpressure suppresses this pass. Each is
+individually correct. Together they have a property nobody designed — **a
+project that has finished its plan can never re-enter the cycle.** The audit
+keeps finding bugs forever; this pass keeps finding them approved and new; and
+the project's own finished state means nothing will ever work them. That is a
+one-way ratchet, and it defeats the entire purpose of having audit and nightly
+at all.
+
+The ratchet is not broken by removing a guard. It is broken by making the
+question "may this project work again?" answerable **from local state alone** —
+this step, plus the generation fingerprint in Step 4. Note what this must *not*
+depend on: a downstream `codebase-audit` firing. That audit is one-shot per
+completion, so a project whose completion already spent its one shot has no way
+to be audited again — no new findings, no new phases, no new completion. Ask a
+question whose answer depends on the thing you are trying to unblock and it can
+never be answered.
+
+### Report what you saw
+
+For every scoped project, state its sprint state and what you did about it:
+phases appended, entries settled, entries left in flight, or *already finished
+with nothing approved and new*. That last one matters most — **"correctly
+suppressed" and "permanently jammed" look identical from outside**, and this log
+line is the only place the difference is visible.
 
 ### Un-stick a stranded project (do this before skipping)
 
@@ -175,6 +247,13 @@ The rule now:
 1. **Write the phases first.** Append them to the gatelog, numbered from the
    next free number, in the `dev-sprint` format, each naming the tickets it
    covers and what "done" is.
+
+   **Name every ticket, by id, in the body of the phase that implements it.**
+   This is not tidiness: Step 2b decides whether a `ticketed` finding is
+   finished by asking which phase covers its `linked_ticket`. A phase that says
+   only "fix the sidecar" leaves that question unanswerable, so the entry can
+   never be settled, so backpressure skips the project forever. The link is the
+   mechanism.
 2. **Then move the pointer**, to your first new phase — and to nothing else. If
    you wrote no phases, leave the pointer byte-for-byte as you found it.
 3. **Then clear the finished flag**, so the loop may provision the phases:
@@ -258,7 +337,24 @@ the projects that were checked and did nothing.
 
 ## Closing the loop
 
-When a ticket-originated `dev-sprint` run reaches "All phases complete," it triggers a one-shot `codebase-audit` on that project (see dev-sprint's own completion step, and note its guard: that audit is one-shot per completion, not per invocation). That audit run is what actually flips the corresponding ledger entries to `status: resolved` — `nightly-support` doesn't need to do this itself, but should recognize `resolved` entries on future scans as fully closed, not something to re-ticket.
+**This skill settles its own ledger.** Step 2b moves `ticketed` → `resolved`
+when the phase implementing each entry is `done`, and it runs every time.
+
+This used to be delegated: a ticket-originated `dev-sprint` reaching "All
+phases complete" triggers a one-shot `codebase-audit`, and *that* run was
+supposed to flip the entries to `resolved`. **Delegating it was the deadlock.**
+That audit is one-shot per completion, so a project whose completion has already
+spent its one shot is never audited again; and the audit could not run in the
+first place without a completion, which needs the project to be allowed to work,
+which is what the `ticketed` backpressure was withholding. The cycle could not
+restart itself.
+
+Settling locally breaks the circularity: the question is answered from the
+gatelog on disk, and the answer does not depend on anything downstream. The
+`codebase-audit` that a completion triggers is still valuable — it is what finds
+the *next* round of bugs — but it is an input to the cycle, never its lock.
+
+`resolved` entries are fully closed: do not re-ticket them.
 
 ## Scheduling this skill itself
 
